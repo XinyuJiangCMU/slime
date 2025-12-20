@@ -91,6 +91,12 @@ def _rebuild_delegate_config(
             env_cfg = build_skills_eval_env_config(args, env, defaults)
             if env_cfg is not None:
                 envs.append(env_cfg)
+        elif env_name == "tb":
+            from examples.eval.terminal_bench.tb_config import build_tb_eval_env_config
+
+            env_cfg = build_tb_eval_env_config(args, env, defaults)
+            if env_cfg is not None:
+                envs.append(env_cfg)
         else:
             raise ValueError(f"Unknown delegate environment: {env_name}")
     return envs
@@ -151,6 +157,10 @@ class EvalDelegateClient:
             from examples.eval.nemo_skills.skills_client import SkillsEvalClient
 
             return SkillsEvalClient.from_config(env_cfg, router_addr)
+        if env_name == "tb":
+            from examples.eval.terminal_bench.tb_client import TbEvalClient
+
+            return TbEvalClient.from_config(env_cfg, router_addr)
         logger.warning("No delegate client registered for environment: %s", env_name)
         return None
 

@@ -16,7 +16,7 @@ This guide is written for ML/algorithm folks who just want it to run.
 ## Prereqs
 
 1) A working OpenAI-compatible inference endpoint, e.g.:
-   - `http://127.0.0.1:30002/v1`
+   - `http://127.0.0.1:30001/v1`
 
 2) Terminal Bench installed and its `tb` CLI available.
    - Activate your TB venv first:
@@ -29,11 +29,29 @@ This guide is written for ML/algorithm folks who just want it to run.
    - Slime requires at least one dataset under `eval.datasets`.
    - You can reuse your existing eval config; just add the delegate section.
 
-## Step 1: Start the TB server
+## Step 1: Start the inference server (sglang)
+
+Example:
+
+```bash
+python3 -m sglang.launch_server \
+  --model-path /data/models/OpenThinker-Agent-v1 \
+  --served-model-name openai/qwen3-8b \
+  --port 30001 \
+  --host 0.0.0.0
+```
+
+Notes:
+- The `served-model-name` should match what TB sends (`openai/<model>`).
+- If your model name is different, update `model_name` in the delegate config.
+
+## Step 2: Start the TB server
 
 Run on the host (same machine where `tb` works):
 
 ```bash
+cd /mnt/data/xinyu/program/my_tb/terminal-bench
+
 python slime/examples/eval/terminal_bench/tb_server.py \
   --host 0.0.0.0 --port 9050 \
   --output-root /tmp/tb-eval
@@ -44,7 +62,21 @@ What it does:
 - Runs `tb run -a terminus-2 -m openai/<model> ... --n-concurrent 8`
 - Waits for completion, then returns `accuracy` and `n_resolved`
 
-## Step 2: Configure Slime eval
+## Step 3: Quick sanity check (curl)
+
+Run a single task (e.g. `hello-world`):
+
+```bash
+curl -X POST http://localhost:9050/evaluate \
+  -H 'Content-Type: application/json' \
+  -d '{"model_name":"qwen3-8b","api_base":"http://127.0.0.1:30001/v1","task_id":"hello-world","n_concurrent":1}'
+```
+
+Where to check outputs:
+- Logs: `/mnt/data/xinyu/program/my_tb/tb_eval_logs/<run_id>.log`
+- Results: `/tmp/tb-eval/<run_id>/results.json`
+
+## Step 4: Configure Slime eval
 
 You need an eval config. Example:
 
@@ -62,17 +94,20 @@ eval:
       url: http://localhost:9050         # "/evaluate" auto-added if missing
       timeout_secs: 1200                 # 20 minutes
       model_name: qwen3-8b
-      api_base: http://127.0.0.1:30002/v1
+      api_base: http://127.0.0.1:30001/v1
       n_tasks: 10
-      n_concurrent: 8
+      n_concurrent: 1
+      # Optional: run specific tasks instead of n_tasks
+      # task_ids: ["hello-world"]
+      # task_id: "hello-world"
 ```
 
 Notes:
 - `model_name` is auto-normalized to `openai/<model>` if you omit the prefix.
-- `n_concurrent` is currently fixed to 8 in `tb_server.py`.
 - The TB client auto-adds `/evaluate` if you give a bare host:port.
+- `task_id` / `task_ids` overrides `n_tasks` when provided.
 
-## Step 3: Tell Slime to use the delegate rollout
+## Step 5: Tell Slime to use the delegate rollout
 
 Add this to your training/eval command:
 
@@ -101,7 +136,8 @@ python slime/train.py \
 
 - 404 from TB server: use `url: http://localhost:9050` or `.../evaluate`.
 - Timeouts: keep `timeout_secs` large (TB tasks can compile code).
-- No TB metrics: check `/tmp/tb-eval/<run_id>/` for JSON results.
+- No TB metrics: check `/tmp/tb-eval/<run_id>/results.json`.
+- No output in terminal: tail the log at `/mnt/data/xinyu/program/my_tb/tb_eval_logs/<run_id>.log`.
 
 ## Reference: the CLI command it runs
 
@@ -109,6 +145,6 @@ The server is aligned with:
 
 ```bash
 OPENAI_API_KEY=EMPTY tb run -a terminus-2 -m openai/qwen3-8b \
-  --agent-kwarg api_base=http://127.0.0.1:30002/v1 \
-  --n-concurrent 8
+  --agent-kwarg api_base=http://127.0.0.1:30001/v1 \
+  --n-concurrent 1
 ```

@@ -4,14 +4,12 @@
 # external Terminal Bench server via the eval_delegate_rollout wrapper.
 
 # Clean up any stale processes from a previous run.
-pkill -9 sglang
+pkill -9 sglang || true
 sleep 3
-ray stop --force
-pkill -9 ray
-pkill -9 python
+ray stop --force || true
+pkill -9 ray || true
 sleep 3
-pkill -9 ray
-pkill -9 python
+pkill -9 ray || true
 
 set -ex
 
@@ -30,7 +28,7 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." &>/dev/null && pwd)"
 source "${REPO_ROOT}/scripts/models/qwen3-8B.sh"
 
 # Store eval/delegate settings in a YAML config similar to examples/eval_multi_task.
-EVAL_CONFIG_PATH=${TB_EVAL_CONFIG_PATH:-"${REPO_ROOT}/examples/eval/scripts/multi_tasks.yaml"}
+EVAL_CONFIG_PATH=${TB_EVAL_CONFIG_PATH:-"${REPO_ROOT}/examples/eval/scripts/eval_tb_smoke.yaml"}
 
 DEBUG_ARGS=(
   --debug-rollout-only
@@ -73,9 +71,8 @@ EVAL_ARGS=(
 )
 
 PERF_ARGS=(
-   --tensor-model-parallel-size 2
-   --sequence-parallel
-   --pipeline-model-parallel-size 1
+   --tensor-model-parallel-size 1
+      --pipeline-model-parallel-size 1
    --context-parallel-size 1
    --expert-model-parallel-size 1
    --expert-tensor-parallel-size 1
@@ -124,7 +121,7 @@ SGLANG_ARGS=(
    --sglang-cuda-graph-max-bs 16
    # set up sglang router
    # --sglang-router-ip "${ROUTER_IP}"
-   --sglang-router-port 30002
+   --sglang-router-port 30001
 )
 
 MISC_ARGS=(
@@ -136,8 +133,8 @@ MISC_ARGS=(
 )
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-export CUDA_VISIBLE_DEVICES=6,7
-ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 2 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
+export CUDA_VISIBLE_DEVICES=4
+ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 1 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
@@ -151,7 +148,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
    -- python3 train.py \
    --actor-num-nodes 1 \
-   --actor-num-gpus-per-node 2 \
+   --actor-num-gpus-per-node 1 \
    --colocate \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \

@@ -10,17 +10,13 @@ eval:
       path: /mnt/data/zhiyao/tb_evaluation/tb_eval_smoke/eval_smoke.jsonl
       rm_type: deepscaler
   delegate:
-    - name: tb
-      url: http://172.17.0.1:9060/evaluate
+    - name: terminal_bench
+      type: examples.eval.terminal_bench.tb_config.build_terminal_bench_config
+      url: http://localhost:9051
       timeout_secs: 14400
       max_retries: 1
-      defaults:
-        agent: terminus-2
-        model: openai/qwen3-8b
-        n_concurrent: 8
-        agent_kwargs:
-          api_base: http://127.0.0.1:30002/v1
-      datasets:
-        - name: terminal-bench-core
-          dataset: terminal-bench-core==0.1.1
-          task_id: hello-world
+      model_name: qwen3-8b
+      api_base: http://127.0.0.1:30001/v1
+      dataset_path: /mnt/data/xinyu/program/slime-tb/terminal-bench/tasks
+      task_id: hello-world
+      n_concurrent: 1

@@ -111,25 +111,41 @@ class TerminalBenchEvaluator:
         }
 
     def _build_command(self, payload: EvalRequestPayload, run_id: str) -> list[str]:
+        # 1. Normalize model name (add openai/ prefix)
         model_name = _normalize_model_name(payload.model_name)
+
         cmd = [
             "tb",
             "run",
+            "-a",
+            "terminus-2",  # Added Agent flag
             "--output-path",
             str(self._config.output_root),
             "--run-id",
             run_id,
         ]
+
+        # 2. Add model
         if model_name:
             cmd.extend(["--model", model_name])
+
+        # 3. Add Agent kwargs (Use api_base exactly like the CLI command)
         if payload.api_base:
             cmd.extend(["--agent-kwarg", f"api_base={payload.api_base}"])
+
+        # 4. Add n_tasks if present
         if payload.n_tasks is not None:
             cmd.extend(["--n-tasks", str(payload.n_tasks)])
+
+        # 5. Add concurrency
+        cmd.extend(["--n-concurrent", "8"])
+
         return cmd
 
     def _build_env(self) -> dict[str, str]:
         env = os.environ.copy()
+        # Inject env var to simulate "OPENAI_API_KEY=EMPTY"
+        env["OPENAI_API_KEY"] = "EMPTY"
         return env
 
     @staticmethod

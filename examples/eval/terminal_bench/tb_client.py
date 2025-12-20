@@ -37,12 +37,15 @@ class TerminalBenchClient(EvalClient):
         return metrics, response
 
     def _build_payload(self, args, rollout_id: int) -> dict[str, Any]:
-        return {
+        payload = {
             "model_name": self._config.model_name,
             "api_base": self._config.api_base,
             "n_tasks": self._config.n_tasks,
             "n_concurrent": self._config.n_concurrent,
         }
+        if self._config.task_ids:
+            payload["task_ids"] = list(self._config.task_ids)
+        return payload
 
     def _request(self, payload: dict[str, Any]) -> dict[str, Any]:
         last_error: Exception | None = None

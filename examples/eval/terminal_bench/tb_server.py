@@ -53,6 +53,8 @@ class EvalRequestPayload:
     api_base: str = ""
     n_tasks: int | None = None
     n_concurrent: int | None = None
+    task_ids: list[str] | None = None
+    task_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +138,16 @@ class TerminalBenchEvaluator:
             cmd.extend(["--agent-kwarg", f"api_base={payload.api_base}"])
 
         # 4. Add n_tasks if present
-        if payload.n_tasks is not None:
+        task_ids = []
+        if payload.task_ids:
+            task_ids.extend([str(item) for item in payload.task_ids if item])
+        if payload.task_id:
+            task_ids.append(str(payload.task_id))
+
+        if task_ids:
+            for task_id in task_ids:
+                cmd.extend(["--task-id", task_id])
+        elif payload.n_tasks is not None:
             cmd.extend(["--n-tasks", str(payload.n_tasks)])
 
         # 5. Add concurrency

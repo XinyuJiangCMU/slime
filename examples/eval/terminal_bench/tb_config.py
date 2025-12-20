@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from examples.eval.eval_delegate import EvalEnvConfig
@@ -15,6 +15,7 @@ class TerminalBenchConfig(EvalEnvConfig):
     api_base: str = "http://172.17.0.1:30001/v1"
     n_tasks: int = 10
     n_concurrent: int = 4
+    task_ids: list[str] = field(default_factory=list)
 
     @classmethod
     def parse(cls, args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]) -> TerminalBenchConfig:
@@ -31,6 +32,14 @@ class TerminalBenchConfig(EvalEnvConfig):
         n_concurrent = raw_env_config.get("n_concurrent")
         if n_concurrent is not None:
             base_cfg.n_concurrent = int(n_concurrent)
+        task_ids = raw_env_config.get("task_ids")
+        if task_ids is None:
+            task_ids = raw_env_config.get("task_id")
+        if task_ids is not None:
+            if isinstance(task_ids, (list, tuple)):
+                base_cfg.task_ids = [str(item) for item in task_ids if item]
+            else:
+                base_cfg.task_ids = [str(task_ids)]
         return base_cfg
 
 

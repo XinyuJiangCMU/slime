@@ -1,18 +1,12 @@
-# Minimal cluster config for running `ns eval` directly on the current host
-# without spinning up containers or mount checks.
+# Minimal Terminal Bench delegate config for running on the host (no containers).
 
-executor: none
+type: examples.eval.terminal_bench.tb_config.build_terminal_bench_config
 
-# Provide stub container entries so pipeline code can reference them even
-# though we do not launch actual containers when executor == "none".
-containers:
-  nemo-skills: ""
-  sglang: ""
-  trtllm: ""
-  vllm: ""
+name: terminal_bench
+url: http://localhost:9050/evaluate
+timeout_secs: 1200
 
-# No mount enforcement in "none" mode, but keep the field for completeness.
-mounts: []
-
-# Optional default env vars propagated to ns jobs. Leave empty unless needed.
-env_vars: []
+model_name: qwen3-8b
+api_base: http://172.17.0.1:30001/v1
+n_tasks: 10
+n_concurrent: 4

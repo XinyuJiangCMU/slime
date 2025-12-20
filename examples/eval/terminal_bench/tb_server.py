@@ -1,297 +1,285 @@
 #!/usr/bin/env python3
+"""
+Simple HTTP server that proxies Slime evaluation requests to the `tb run`
+command shipped with Terminal Bench.
+
+Usage:
+    python examples/eval/terminal_bench/tb_server.py \
+        --host 0.0.0.0 --port 9050 \
+        --output-root /opt/tb-eval
+
+Slime (or Slime-compatible runners) should POST the payload described in
+`EvalRequestPayload` to http://<host>:<port>/evaluate. The server blocks until
+`tb run` finishes, then returns aggregated metrics along with paths to the
+generated artifacts (logs + raw metrics).
+"""
+
 from __future__ import annotations
 
 import argparse
 import json
 import logging
-import math
 import os
 import shlex
 import subprocess
+import sys
 import threading
 import time
 import uuid
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from flask import Flask, jsonify, request
 from omegaconf import OmegaConf
 from omegaconf.errors import OmegaConfBaseException
 
-from examples.eval.terminal_bench.tb_config import TbEvalDatasetConfig
-
-logger = logging.getLogger("tb_eval_server")
+logger = logging.getLogger("terminal_bench_server")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+
+# ---------------------------------------------------------------------------
+# Request payload helpers
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class EvalRequestPayload:
-    rollout_id: int
-    router_url: str
-    defaults: dict[str, Any] = field(default_factory=dict)
-    benchmarks: list[TbEvalDatasetConfig] = field(default_factory=list)
+    model_name: str = ""
+    api_base: str = ""
+    n_tasks: int | None = None
+    n_concurrent: int | None = None
+    dataset_path: str | None = None
+    task_ids: list[str] | None = None
+    task_id: str | None = None
 
 
-def _openai_api_base(router_url: str) -> str:
-    return router_url.rstrip("/") + "/v1"
+@dataclass
+class JobRecord:
+    job_id: str
+    status: str
+    run_id: str
+    command: str
+    output_dir: str
+    log_path: str
+    raw_metrics: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: float = field(default_factory=time.time)
+    started_at: float | None = None
+    finished_at: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "job_id": self.job_id,
+            "status": self.status,
+            "run_id": self.run_id,
+            "command": self.command,
+            "output_dir": self.output_dir,
+            "log_path": self.log_path,
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+        if self.raw_metrics is not None:
+            payload["raw_metrics"] = self.raw_metrics
+        if self.error:
+            payload["error"] = self.error
+        return payload
 
 
-def _pass_at_k_estimator(n: int, c: int, k: int) -> float:
-    if n - c < k:
-        return 1.0
-    prod = 1.0
-    for value in range(n - c + 1, n + 1):
-        prod *= 1.0 - k / value
-    return float(1.0 - prod)
+# ---------------------------------------------------------------------------
+# Configuration + command helpers
+# ---------------------------------------------------------------------------
 
 
-def _compute_pass_at_k(results: list[dict[str, Any]]) -> dict[int, float]:
-    task_counts: dict[str, list[int]] = defaultdict(list)
-    for result in results:
-        task_id = result.get("task_id")
-        if not task_id:
-            continue
-        task_counts[task_id].append(1 if result.get("is_resolved") else 0)
-
-    if not task_counts:
-        return {}
-
-    min_attempts = min(len(counts) for counts in task_counts.values())
-    if min_attempts < 2:
-        return {}
-
-    k_values = {2**i for i in range(1, int(math.log2(min_attempts)) + 1)}
-    if min_attempts >= 5:
-        k_values.add(5)
-    if min_attempts >= 10:
-        k_values.add(10)
-
-    pass_at_k: dict[int, float] = {}
-    for k in sorted(k_values):
-        passes = []
-        for success in task_counts.values():
-            if len(success) < k:
-                continue
-            passes.append(_pass_at_k_estimator(len(success), sum(success), k))
-        if passes:
-            pass_at_k[k] = float(sum(passes) / len(passes))
-    return pass_at_k
-
-
-def _summarize_results(results_json: dict[str, Any]) -> dict[str, float]:
-    results = results_json.get("results") or []
-    if not isinstance(results, list):
-        return {}
-
-    total = len(results)
-    resolved = sum(1 for r in results if r.get("is_resolved"))
-    unresolved = total - resolved
-    accuracy = (resolved / total) if total else 0.0
-
-    metrics: dict[str, float] = {
-        "n_total": float(total),
-        "n_resolved": float(resolved),
-        "n_unresolved": float(unresolved),
-        "accuracy": float(accuracy),
-    }
-
-    pass_at_k = _compute_pass_at_k(results)
-    for k, v in pass_at_k.items():
-        metrics[f"pass_at_{k}"] = float(v)
-
-    if total:
-        total_in = sum((r.get("total_input_tokens") or 0) for r in results)
-        total_out = sum((r.get("total_output_tokens") or 0) for r in results)
-        metrics["avg_input_tokens"] = float(total_in) / total
-        metrics["avg_output_tokens"] = float(total_out) / total
-
-    return metrics
+def _normalize_model_name(model_name: str) -> str:
+    name = (model_name or "").strip()
+    if not name:
+        return ""
+    if "/" in name:
+        return name
+    return f"openai/{name}"
 
 
 @dataclass
 class ServerConfig:
     output_root: Path
-    tb_command: str = "tb"
-    tb_workdir: Path | None = None
-    default_agent: str = "terminus-1"
-    default_model: str = "openai/slime-openai-model"
-    default_n_concurrent: int = 4
-    default_n_attempts: int = 1
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "ServerConfig":
-        return cls(
-            output_root=Path(args.output_root).expanduser().resolve(),
-            tb_command=args.tb_command,
-            tb_workdir=Path(args.tb_workdir).expanduser().resolve() if args.tb_workdir else None,
-            default_agent=args.default_agent,
-            default_model=args.default_model,
-            default_n_concurrent=args.default_n_concurrent,
-            default_n_attempts=args.default_n_attempts,
-        )
+        return cls(output_root=Path(args.output_root).expanduser().resolve())
 
 
 class TerminalBenchEvaluator:
     def __init__(self, config: ServerConfig):
         self._config = config
         self._lock = threading.Lock()
+        self._jobs_lock = threading.Lock()
+        self._jobs: dict[str, JobRecord] = {}
         self._config.output_root.mkdir(parents=True, exist_ok=True)
+        self._log_root = REPO_ROOT / "tb_eval_logs"
+        self._log_root.mkdir(parents=True, exist_ok=True)
 
     def evaluate(self, payload: EvalRequestPayload) -> dict[str, Any]:
-        if not payload.benchmarks:
-            warning_msg = "No TB benchmarks specified in delegate config; skipping evaluation."
-            logger.warning(warning_msg)
-            return {
-                "job_id": uuid.uuid4().hex,
-                "command": None,
-                "output_dir": None,
-                "log_path": None,
-                "warning": warning_msg,
-                "raw_metrics": {},
-            }
+        if not payload.model_name:
+            raise ValueError("Missing `model_name` in request payload.")
+        if not payload.api_base:
+            raise ValueError("Missing `api_base` in request payload.")
 
         job_id = uuid.uuid4().hex
-        raw_metrics: dict[str, Any] = {"tb": {}}
-        runs: list[dict[str, Any]] = []
+        run_id = f"{int(time.time())}-{job_id[:8]}"
+        run_dir = self._config.output_root / run_id
 
-        with self._lock:
-            for benchmark in payload.benchmarks:
-                result = self._run_single_benchmark(payload, benchmark)
-                runs.append(result["run_info"])
-                raw_metrics["tb"][benchmark.name] = result["metrics"]
+        command = self._build_command(payload, run_id)
+        command_str = " ".join(shlex.quote(part) for part in command)
+        log_path = self._log_root / f"{run_id}.log"
 
-        command_summary = "\n".join(run["command"] for run in runs) if runs else None
-        log_path = runs[-1]["log_path"] if runs else None
-        output_dir = runs[-1]["output_dir"] if runs else None
+        record = JobRecord(
+            job_id=job_id,
+            status="queued",
+            run_id=run_id,
+            command=command_str,
+            output_dir=str(run_dir),
+            log_path=str(log_path),
+        )
+        with self._jobs_lock:
+            self._jobs[job_id] = record
+
+        thread = threading.Thread(
+            target=self._run_job,
+            args=(job_id, payload, run_dir, command, log_path),
+            daemon=True,
+        )
+        thread.start()
 
         return {
             "job_id": job_id,
-            "command": command_summary,
-            "output_dir": output_dir,
-            "log_path": log_path,
-            "raw_metrics": raw_metrics,
-            "runs": runs,
+            "status": "queued",
+            "status_url": f"/status/{job_id}",
+            "run_id": run_id,
+            "command": command_str,
+            "output_dir": str(run_dir),
+            "log_path": str(log_path),
         }
 
-    def _run_single_benchmark(self, payload: EvalRequestPayload, benchmark: TbEvalDatasetConfig) -> dict[str, Any]:
-        run_id = f"rollout-{payload.rollout_id}-{benchmark.name}-{int(time.time())}"
-        run_dir = self._config.output_root / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        log_path = run_dir / "tb_eval.log"
-
-        command = self._build_command(payload.defaults, benchmark, run_id, payload.router_url)
-        env = self._build_env()
-        logger.info("Starting TB eval for %s: %s", benchmark.name, " ".join(shlex.quote(p) for p in command))
-        self._run_command(command, env=env, log_path=log_path)
-
-        metrics = self._collect_metrics(run_dir)
-        return {
-            "run_info": {
-                "benchmark": benchmark.name,
-                "command": " ".join(shlex.quote(part) for part in command),
-                "output_dir": str(run_dir),
-                "log_path": str(log_path),
-                "run_id": run_id,
-            },
-            "metrics": metrics,
-        }
-
-    def _build_command(
+    def _run_job(
         self,
-        defaults: Mapping[str, Any],
-        benchmark: TbEvalDatasetConfig,
-        run_id: str,
-        router_url: str,
-    ) -> list[str]:
-        cmd = shlex.split(self._config.tb_command)
-        cmd += [
+        job_id: str,
+        payload: EvalRequestPayload,
+        run_dir: Path,
+        command: list[str],
+        log_path: Path,
+    ) -> None:
+        with self._jobs_lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                return
+            record.status = "running"
+            record.started_at = time.time()
+
+        env = self._build_env()
+        logger.info("Starting Terminal Bench run: %s", " ".join(shlex.quote(part) for part in command))
+        try:
+            with self._lock:
+                self._run_command(command, env=env, log_path=log_path)
+            metrics = self._collect_metrics(run_dir)
+            with self._jobs_lock:
+                record = self._jobs.get(job_id)
+                if record is None:
+                    return
+                record.status = "completed"
+                record.raw_metrics = metrics
+                record.finished_at = time.time()
+        except Exception as exc:  # noqa: BLE001
+            with self._jobs_lock:
+                record = self._jobs.get(job_id)
+                if record is None:
+                    return
+                record.status = "failed"
+                record.error = str(exc)
+                record.finished_at = time.time()
+
+    def get_job_status(self, job_id: str) -> dict[str, Any] | None:
+        with self._jobs_lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                return None
+            return record.to_dict()
+
+    def _build_command(self, payload: EvalRequestPayload, run_id: str) -> list[str]:
+        # 1. Normalize model name (add openai/ prefix)
+        model_name = _normalize_model_name(payload.model_name)
+
+        cmd = [
+            "tb",
             "run",
+            "-a",
+            "terminus-2",  # Added Agent flag
             "--output-path",
             str(self._config.output_root),
             "--run-id",
             run_id,
         ]
 
-        if benchmark.dataset:
-            cmd += ["--dataset", benchmark.dataset]
-        if benchmark.dataset_path:
-            cmd += ["--dataset-path", benchmark.dataset_path]
-        if benchmark.dataset_config:
-            cmd += ["--dataset-config", benchmark.dataset_config]
+        # 2. Add model
+        if model_name:
+            cmd.extend(["--model", model_name])
 
-        for task_id in benchmark.task_ids:
-            cmd += ["--task-id", task_id]
-        for task_id in benchmark.exclude_task_ids:
-            cmd += ["--exclude-task-id", task_id]
-        if benchmark.n_tasks is not None:
-            cmd += ["--n-tasks", str(benchmark.n_tasks)]
+        # 3. Add Agent kwargs (Use api_base exactly like the CLI command)
+        if payload.api_base:
+            cmd.extend(["--agent-kwarg", f"api_base={payload.api_base}"])
 
-        agent = benchmark.agent or defaults.get("agent") or self._config.default_agent
-        model = benchmark.model or defaults.get("model") or self._config.default_model
-        cmd += ["--agent", agent]
-        if model:
-            cmd += ["--model", model]
+        # 4. Add n_tasks if present
+        task_ids = []
+        if payload.task_ids:
+            task_ids.extend([str(item) for item in payload.task_ids if item])
+        if payload.task_id:
+            task_ids.append(str(payload.task_id))
 
-        n_concurrent = benchmark.n_concurrent or defaults.get("n_concurrent") or self._config.default_n_concurrent
-        n_attempts = benchmark.n_attempts or defaults.get("n_attempts") or self._config.default_n_attempts
-        cmd += ["--n-concurrent", str(n_concurrent)]
-        cmd += ["--n-attempts", str(n_attempts)]
+        if payload.dataset_path:
+            cmd.extend(["--dataset-path", payload.dataset_path])
 
-        no_rebuild = benchmark.no_rebuild if benchmark.no_rebuild is not None else defaults.get("no_rebuild")
-        cleanup = benchmark.cleanup if benchmark.cleanup is not None else defaults.get("cleanup")
+        if task_ids:
+            for task_id in task_ids:
+                cmd.extend(["--task-id", task_id])
+        elif payload.n_tasks is not None:
+            cmd.extend(["--n-tasks", str(payload.n_tasks)])
 
-        if no_rebuild is True:
-            cmd.append("--no-rebuild")
-        if no_rebuild is False:
-            cmd.append("--rebuild")
-        if cleanup is True:
-            cmd.append("--cleanup")
-        if cleanup is False:
-            cmd.append("--no-cleanup")
-
-        if benchmark.global_timeout_multiplier is not None:
-            cmd += ["--global-timeout-multiplier", str(benchmark.global_timeout_multiplier)]
-        if benchmark.global_agent_timeout_sec is not None:
-            cmd += ["--global-agent-timeout-sec", str(benchmark.global_agent_timeout_sec)]
-        if benchmark.global_test_timeout_sec is not None:
-            cmd += ["--global-test-timeout-sec", str(benchmark.global_test_timeout_sec)]
-
-        agent_kwargs = self._normalize_agent_kwargs(defaults.get("agent_kwargs"))
-        agent_kwargs += self._normalize_agent_kwargs(benchmark.agent_kwargs)
-
-        api_base = _openai_api_base(router_url)
-        if not any(arg.startswith("api_base=") for arg in agent_kwargs):
-            agent_kwargs.append(f"api_base={api_base}")
-
-        for kwarg in agent_kwargs:
-            cmd += ["--agent-kwarg", kwarg]
+        # 5. Add concurrency
+        n_concurrent = payload.n_concurrent
+        if n_concurrent is None:
+            n_concurrent = 1
+        cmd.extend(["--n-concurrent", str(n_concurrent)])
 
         return cmd
 
-    @staticmethod
-    def _normalize_agent_kwargs(value: Any) -> list[str]:
-        if isinstance(value, dict):
-            return [f"{k}={v}" for k, v in value.items()]
-        if isinstance(value, list):
-            return [str(v) for v in value]
-        return []
-
     def _build_env(self) -> dict[str, str]:
         env = os.environ.copy()
-        env.setdefault("OPENAI_API_KEY", "EMPTY")
+        # Inject env var to simulate "OPENAI_API_KEY=EMPTY"
+        env["OPENAI_API_KEY"] = "EMPTY"
         return env
 
-    def _run_command(self, cmd: list[str], *, env: dict[str, str], log_path: Path):
+    @staticmethod
+    def _run_command(cmd: list[str], *, env: dict[str, str], log_path: Path):
         with open(log_path, "w", encoding="utf-8") as log_file:
             process = subprocess.Popen(
                 cmd,
-                stdout=log_file,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 env=env,
-                cwd=str(self._config.tb_workdir) if self._config.tb_workdir else None,
+                text=True,
+                bufsize=1,
             )
+            assert process.stdout is not None
+            for line in process.stdout:
+                log_file.write(line)
+                log_file.flush()
+                sys.stdout.write(line)
+                sys.stdout.flush()
             retcode = process.wait()
         if retcode != 0:
             with open(log_path, encoding="utf-8", errors="ignore") as log_file:
@@ -299,17 +287,61 @@ class TerminalBenchEvaluator:
             raise RuntimeError(f"`tb run` failed with exit code {retcode}. See {log_path}\n{tail}")
 
     @staticmethod
-    def _collect_metrics(run_dir: Path) -> dict[str, float]:
-        results_path = run_dir / "results.json"
-        if not results_path.exists():
-            logger.warning("Results file missing at %s", results_path)
+    def _collect_metrics(run_dir: Path) -> dict[str, Any]:
+        metrics_path = run_dir / "results.json"
+        if not metrics_path.exists():
+            logger.warning("Results file missing at %s", metrics_path)
             return {}
+
+        metrics = TerminalBenchEvaluator._extract_metrics(metrics_path)
+        if not metrics:
+            logger.warning("No accuracy/n_resolved metrics found in %s", metrics_path)
+        return metrics
+
+    @staticmethod
+    def _extract_metrics(metrics_path: Path) -> dict[str, Any]:
         try:
-            results_json = json.loads(results_path.read_text(encoding="utf-8"))
+            with open(metrics_path, encoding="utf-8") as fp:
+                metrics_data = json.load(fp)
         except json.JSONDecodeError as exc:
-            logger.warning("Failed to parse %s: %s", results_path, exc)
+            logger.warning("Failed to parse %s: %s", metrics_path, exc)
             return {}
-        return _summarize_results(results_json)
+
+        accuracy = metrics_data.get("accuracy")
+        n_resolved = metrics_data.get("n_resolved")
+
+        if accuracy is None or n_resolved is None:
+            results = metrics_data.get("results")
+            if isinstance(results, list):
+                resolved = sum(1 for result in results if result.get("is_resolved"))
+                total = len(results)
+                if n_resolved is None:
+                    n_resolved = resolved
+                if accuracy is None:
+                    accuracy = resolved / total if total else 0.0
+
+        if accuracy is None or n_resolved is None:
+            return {}
+
+        metrics: dict[str, Any] = {}
+        if accuracy is not None:
+            try:
+                metrics["accuracy"] = float(accuracy)
+            except (TypeError, ValueError):
+                logger.warning("Non-numeric accuracy in %s: %r", metrics_path, accuracy)
+        if n_resolved is not None:
+            try:
+                metrics["n_resolved"] = int(n_resolved)
+            except (TypeError, ValueError):
+                logger.warning("Non-numeric n_resolved in %s: %r", metrics_path, n_resolved)
+        if "accuracy" not in metrics or "n_resolved" not in metrics:
+            return {}
+        return metrics
+
+
+# ---------------------------------------------------------------------------
+# HTTP server
+# ---------------------------------------------------------------------------
 
 
 def build_app(evaluator: TerminalBenchEvaluator) -> Flask:
@@ -337,35 +369,31 @@ def build_app(evaluator: TerminalBenchEvaluator) -> Flask:
             logger.exception("Evaluation failed")
             return jsonify({"error": str(exc)}), 500
 
+    @app.get("/status/<job_id>")
+    def status_endpoint(job_id: str):
+        status = evaluator.get_job_status(job_id)
+        if status is None:
+            return jsonify({"error": "job not found"}), 404
+        return jsonify(status)
+
     return app
 
 
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the Terminal-Bench evaluation HTTP server.")
+    parser = argparse.ArgumentParser(description="Run the Terminal Bench evaluation HTTP server.")
     parser.add_argument("--host", type=str, default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=9060)
+    parser.add_argument("--port", type=int, default=9050)
     parser.add_argument(
         "--output-root",
         type=str,
-        default="./tb-eval-output",
-        help="Directory to store TB run outputs.",
+        default="./terminal-bench-output",
+        help="Directory to store `tb run` outputs.",
     )
-    parser.add_argument(
-        "--tb-command",
-        type=str,
-        default="tb",
-        help="Command used to invoke Terminal-Bench (e.g. 'tb' or 'python -m terminal_bench.cli.tb.main').",
-    )
-    parser.add_argument(
-        "--tb-workdir",
-        type=str,
-        default=None,
-        help="Working directory to run TB from (useful if you want relative paths).",
-    )
-    parser.add_argument("--default-agent", type=str, default="terminus-1")
-    parser.add_argument("--default-model", type=str, default="openai/slime-openai-model")
-    parser.add_argument("--default-n-concurrent", type=int, default=4)
-    parser.add_argument("--default-n-attempts", type=int, default=1)
     return parser.parse_args()
 
 
@@ -375,7 +403,7 @@ def main():
     evaluator = TerminalBenchEvaluator(config)
     app = build_app(evaluator)
     logger.info(
-        "Starting TB evaluation server on %s:%s (output root=%s)",
+        "Starting Terminal Bench evaluation server on %s:%s (output root=%s)",
         args.host,
         args.port,
         config.output_root,

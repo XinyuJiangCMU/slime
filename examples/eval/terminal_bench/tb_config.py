@@ -1,77 +1,51 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
-from typing import Any, Mapping
-
-from omegaconf import OmegaConf
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
 
 from examples.eval.eval_delegate import EvalEnvConfig
 
 
 @dataclass
-class TbEvalDatasetConfig:
-    """Dataset configuration for Terminal-Bench runs."""
+class TerminalBenchConfig(EvalEnvConfig):
+    """Environment configuration shared by the Terminal Bench client/server."""
 
-    name: str = ""
-    dataset: str | None = None
+    model_name: str = "qwen3-8b"
+    api_base: str = "http://172.17.0.1:30001/v1"
+    n_tasks: int = 10
+    n_concurrent: int = 4
     dataset_path: str | None = None
-    dataset_config: str | None = None
     task_ids: list[str] = field(default_factory=list)
-    exclude_task_ids: list[str] = field(default_factory=list)
-    n_tasks: int | None = None
-    agent: str | None = None
-    model: str | None = None
-    agent_kwargs: dict[str, Any] = field(default_factory=dict)
-    n_concurrent: int | None = None
-    n_attempts: int | None = None
-    no_rebuild: bool | None = None
-    cleanup: bool | None = None
-    global_timeout_multiplier: float | None = None
-    global_agent_timeout_sec: float | None = None
-    global_test_timeout_sec: float | None = None
-
-    def __post_init__(self):
-        self.name = (self.name or "").strip()
-        if not self.name:
-            raise ValueError("Each TB dataset entry must include a non-empty `name`.")
-        if not (self.dataset or self.dataset_path or self.dataset_config):
-            raise ValueError(
-                f"TB dataset '{self.name}' must define `dataset`, `dataset_path`, or `dataset_config`."
-            )
 
     @classmethod
-    def parse(cls, args, dataset_cfg: Mapping[str, Any], defaults: Mapping[str, Any]):
-        cfg = OmegaConf.merge(
-            OmegaConf.structured(cls),
-            OmegaConf.create(defaults or {}),
-            OmegaConf.create(dataset_cfg or {}),
-        )
-        obj = OmegaConf.to_object(cfg)
-        if not isinstance(obj, cls):
-            obj = cls(**obj)
-        return obj
-
-    def to_payload(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {}
-        for field_info in fields(self):
-            value = getattr(self, field_info.name)
-            if value in (None, {}, []):
-                continue
-            payload[field_info.name] = value
-        return payload
-
-
-@dataclass
-class TbEvalEnvConfig(EvalEnvConfig):
-    datasets: list[TbEvalDatasetConfig] = field(default_factory=list)
-
-    @classmethod
-    def parse(cls, args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]) -> "TbEvalEnvConfig":
-        base_cfg: TbEvalEnvConfig = super().parse(raw_env_config, defaults)
-        datasets = raw_env_config.get("datasets") or []
-        base_cfg.datasets = [TbEvalDatasetConfig.parse(args, d, base_cfg.defaults) for d in datasets]
+    def parse(cls, args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]) -> TerminalBenchConfig:
+        base_cfg: TerminalBenchConfig = super().parse(raw_env_config, defaults)
+        model_name = raw_env_config.get("model_name")
+        if model_name is not None:
+            base_cfg.model_name = str(model_name)
+        api_base = raw_env_config.get("api_base")
+        if api_base is not None:
+            base_cfg.api_base = str(api_base)
+        n_tasks = raw_env_config.get("n_tasks")
+        if n_tasks is not None:
+            base_cfg.n_tasks = int(n_tasks)
+        n_concurrent = raw_env_config.get("n_concurrent")
+        if n_concurrent is not None:
+            base_cfg.n_concurrent = int(n_concurrent)
+        dataset_path = raw_env_config.get("dataset_path")
+        if dataset_path is not None:
+            base_cfg.dataset_path = str(dataset_path)
+        task_ids = raw_env_config.get("task_ids")
+        if task_ids is None:
+            task_ids = raw_env_config.get("task_id")
+        if task_ids is not None:
+            if isinstance(task_ids, (list, tuple)):
+                base_cfg.task_ids = [str(item) for item in task_ids if item]
+            else:
+                base_cfg.task_ids = [str(task_ids)]
         return base_cfg
 
 
-def build_tb_eval_env_config(args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]):
-    return TbEvalEnvConfig.parse(args, raw_env_config, defaults)
+def build_terminal_bench_config(args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]):
+    return TerminalBenchConfig.parse(args, raw_env_config, defaults)

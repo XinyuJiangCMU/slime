@@ -15,7 +15,10 @@ class TerminalBenchClient(EvalClient):
     def __init__(self, config: TerminalBenchConfig, router_url: str):
         super().__init__(config.name or "terminal_bench")
         self._config = config
-        self._endpoint = (config.url or "").rstrip("/")
+        endpoint = (config.url or "").rstrip("/")
+        if endpoint and not endpoint.endswith("/evaluate"):
+            endpoint = f"{endpoint}/evaluate"
+        self._endpoint = endpoint
         self._timeout_secs = float(config.timeout_secs)
         self._max_retries = max(1, int(config.max_retries))
         self._headers = dict(config.headers or {})

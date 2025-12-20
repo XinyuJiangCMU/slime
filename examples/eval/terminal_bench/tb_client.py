@@ -41,6 +41,7 @@ class TerminalBenchClient(EvalClient):
             "model_name": self._config.model_name,
             "api_base": self._config.api_base,
             "n_tasks": self._config.n_tasks,
+            "n_concurrent": self._config.n_concurrent,
         }
 
     def _request(self, payload: dict[str, Any]) -> dict[str, Any]:

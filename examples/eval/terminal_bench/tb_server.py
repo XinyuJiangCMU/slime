@@ -52,6 +52,7 @@ class EvalRequestPayload:
     model_name: str = ""
     api_base: str = ""
     n_tasks: int | None = None
+    n_concurrent: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +83,8 @@ class TerminalBenchEvaluator:
         self._config = config
         self._lock = threading.Lock()
         self._config.output_root.mkdir(parents=True, exist_ok=True)
+        self._log_root = REPO_ROOT / "tb_eval_logs"
+        self._log_root.mkdir(parents=True, exist_ok=True)
 
     def evaluate(self, payload: EvalRequestPayload) -> dict[str, Any]:
         if not payload.model_name:
@@ -92,10 +95,9 @@ class TerminalBenchEvaluator:
         job_id = uuid.uuid4().hex
         run_id = f"{int(time.time())}-{job_id[:8]}"
         run_dir = self._config.output_root / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
 
         command = self._build_command(payload, run_id)
-        log_path = run_dir / "tb_eval.log"
+        log_path = self._log_root / f"{run_id}.log"
         env = self._build_env()
         logger.info("Starting Terminal Bench run: %s", " ".join(shlex.quote(part) for part in command))
         with self._lock:
@@ -138,7 +140,10 @@ class TerminalBenchEvaluator:
             cmd.extend(["--n-tasks", str(payload.n_tasks)])
 
         # 5. Add concurrency
-        cmd.extend(["--n-concurrent", "8"])
+        n_concurrent = payload.n_concurrent
+        if n_concurrent is None:
+            n_concurrent = 1
+        cmd.extend(["--n-concurrent", str(n_concurrent)])
 
         return cmd
 
@@ -151,7 +156,20 @@ class TerminalBenchEvaluator:
     @staticmethod
     def _run_command(cmd: list[str], *, env: dict[str, str], log_path: Path):
         with open(log_path, "w", encoding="utf-8") as log_file:
-            process = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, env=env)
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                text=True,
+                bufsize=1,
+            )
+            assert process.stdout is not None
+            for line in process.stdout:
+                log_file.write(line)
+                log_file.flush()
+                sys.stdout.write(line)
+                sys.stdout.flush()
             retcode = process.wait()
         if retcode != 0:
             with open(log_path, encoding="utf-8", errors="ignore") as log_file:

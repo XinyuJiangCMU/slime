@@ -15,6 +15,7 @@ class TerminalBenchConfig(EvalEnvConfig):
     api_base: str = "http://172.17.0.1:30001/v1"
     n_tasks: int = 10
     n_concurrent: int = 4
+    dataset_path: str | None = None
     task_ids: list[str] = field(default_factory=list)
 
     @classmethod
@@ -32,6 +33,9 @@ class TerminalBenchConfig(EvalEnvConfig):
         n_concurrent = raw_env_config.get("n_concurrent")
         if n_concurrent is not None:
             base_cfg.n_concurrent = int(n_concurrent)
+        dataset_path = raw_env_config.get("dataset_path")
+        if dataset_path is not None:
+            base_cfg.dataset_path = str(dataset_path)
         task_ids = raw_env_config.get("task_ids")
         if task_ids is None:
             task_ids = raw_env_config.get("task_id")

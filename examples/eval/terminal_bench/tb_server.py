@@ -53,6 +53,7 @@ class EvalRequestPayload:
     api_base: str = ""
     n_tasks: int | None = None
     n_concurrent: int | None = None
+    dataset_path: str | None = None
     task_ids: list[str] | None = None
     task_id: str | None = None
 
@@ -143,6 +144,9 @@ class TerminalBenchEvaluator:
             task_ids.extend([str(item) for item in payload.task_ids if item])
         if payload.task_id:
             task_ids.append(str(payload.task_id))
+
+        if payload.dataset_path:
+            cmd.extend(["--dataset-path", payload.dataset_path])
 
         if task_ids:
             for task_id in task_ids:

@@ -43,6 +43,8 @@ class TerminalBenchClient(EvalClient):
             "n_tasks": self._config.n_tasks,
             "n_concurrent": self._config.n_concurrent,
         }
+        if self._config.dataset_path:
+            payload["dataset_path"] = self._config.dataset_path
         if self._config.task_ids:
             payload["task_ids"] = list(self._config.task_ids)
         return payload

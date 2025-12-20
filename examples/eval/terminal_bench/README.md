@@ -69,7 +69,7 @@ Run a single task (e.g. `hello-world`):
 ```bash
 curl -X POST http://localhost:9050/evaluate \
   -H 'Content-Type: application/json' \
-  -d '{"model_name":"qwen3-8b","api_base":"http://127.0.0.1:30001/v1","task_id":"hello-world","n_concurrent":1}'
+  -d '{"model_name":"qwen3-8b","api_base":"http://127.0.0.1:30001/v1","dataset_path":"/mnt/data/xinyu/program/my_tb/terminal-bench/tasks","task_id":"hello-world","n_concurrent":1}'
 ```
 
 Where to check outputs:
@@ -95,6 +95,7 @@ eval:
       timeout_secs: 1200                 # 20 minutes
       model_name: qwen3-8b
       api_base: http://127.0.0.1:30001/v1
+      dataset_path: /mnt/data/xinyu/program/my_tb/terminal-bench/tasks
       n_tasks: 10
       n_concurrent: 1
       # Optional: run specific tasks instead of n_tasks
@@ -106,6 +107,7 @@ Notes:
 - `model_name` is auto-normalized to `openai/<model>` if you omit the prefix.
 - The TB client auto-adds `/evaluate` if you give a bare host:port.
 - `task_id` / `task_ids` overrides `n_tasks` when provided.
+- `dataset_path` lets you run from any working directory.
 
 ## Step 5: Tell Slime to use the delegate rollout
 

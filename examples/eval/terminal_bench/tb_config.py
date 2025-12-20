@@ -1,52 +1,38 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from examples.eval.eval_delegate import EvalEnvConfig, EvalEnvDatasetConfig
+from examples.eval.eval_delegate import EvalEnvConfig
 
 
 @dataclass
-class SkillsEvalEnvDatasetConfig(EvalEnvDatasetConfig):
-    """Dataset configuration shared by the Skills client/server."""
+class TerminalBenchConfig(EvalEnvConfig):
+    """Environment configuration shared by the Terminal Bench client/server."""
 
-    def __post_init__(self):
-        name = (self.name or "").strip()
-        self.name = name
-        if not name:
-            raise ValueError("Each Skills dataset entry must include a non-empty `name`.")
-        if ":" in name:
-            raise ValueError(
-                "Colon in dataset name is not allowed; use `n_samples_per_eval_prompt` to configure samples per prompt."
-            )
-
-    @property
-    def runtime_name(self) -> str:
-        if self.n_samples_per_eval_prompt is None:
-            return self.name
-        return f"{self.name}:{self.n_samples_per_eval_prompt}"
+    model_name: str = "qwen3-8b"
+    api_base: str = "http://172.17.0.1:30001/v1"
+    n_tasks: int = 10
+    n_concurrent: int = 4
 
     @classmethod
-    def parse(cls, args, dataset_cfg: Mapping[str, Any], defaults: Mapping[str, Any]):
-        return super().parse(args, dataset_cfg, defaults)
-
-
-@dataclass
-class SkillsEvalEnvConfig(EvalEnvConfig):
-    """Environment configuration shared by the Skills client/server."""
-
-    datasets: list[SkillsEvalEnvDatasetConfig] = field(default_factory=list)
-
-    @classmethod
-    def parse(cls, args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]) -> SkillsEvalEnvConfig:
-        base_cfg: SkillsEvalEnvConfig = super().parse(raw_env_config, defaults)
-        datasets = raw_env_config.get("datasets") or []
-        base_cfg.datasets = [
-            SkillsEvalEnvDatasetConfig.parse(args, dataset_cfg, base_cfg.defaults) for dataset_cfg in datasets
-        ]
+    def parse(cls, args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]) -> TerminalBenchConfig:
+        base_cfg: TerminalBenchConfig = super().parse(raw_env_config, defaults)
+        model_name = raw_env_config.get("model_name")
+        if model_name is not None:
+            base_cfg.model_name = str(model_name)
+        api_base = raw_env_config.get("api_base")
+        if api_base is not None:
+            base_cfg.api_base = str(api_base)
+        n_tasks = raw_env_config.get("n_tasks")
+        if n_tasks is not None:
+            base_cfg.n_tasks = int(n_tasks)
+        n_concurrent = raw_env_config.get("n_concurrent")
+        if n_concurrent is not None:
+            base_cfg.n_concurrent = int(n_concurrent)
         return base_cfg
 
 
-def build_skills_eval_env_config(args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]):
-    return SkillsEvalEnvConfig.parse(args, raw_env_config, defaults)
+def build_terminal_bench_config(args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]):
+    return TerminalBenchConfig.parse(args, raw_env_config, defaults)

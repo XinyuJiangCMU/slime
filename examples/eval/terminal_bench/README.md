@@ -15,17 +15,25 @@ This guide is written for ML/algorithm folks who just want it to run.
 
 ## Prereqs
 
+This setup assumes `slime/` and `terminal-bench/` are sibling directories under
+`/mnt/data/xinyu/program/slime-tb`, and you only need one venv at
+`/mnt/data/xinyu/program/slime-tb/.venv`.
+
 1) A working OpenAI-compatible inference endpoint, e.g.:
    - `http://127.0.0.1:30001/v1`
 
 2) Terminal Bench installed and its `tb` CLI available.
-   - Activate your TB venv first:
-     ```bash
-     source terminal-bench/.venv/bin/activate
-     tb --help
-     ```
+   - Use the same venv for both Slime and TerminalBench.
 
-3) A Slime eval config file that includes `eval.datasets`.
+3) TerminalBench Eval Server dependencies (Slime side only).
+   - Install with:
+     ```bash
+     uv pip install -r ../slime/examples/eval/terminal_bench/requirements.txt
+     ```
+   - Do not assume these dependencies exist in `terminal-bench/`.
+   - Do not put this `requirements.txt` under `terminal-bench/`.
+
+4) A Slime eval config file that includes `eval.datasets`.
    - Slime requires at least one dataset under `eval.datasets`.
    - You can reuse your existing eval config; just add the delegate section.
 
@@ -50,7 +58,7 @@ Notes:
 Run on the host (same machine where `tb` works):
 
 ```bash
-cd /mnt/data/xinyu/program/my_tb/terminal-bench
+cd /mnt/data/xinyu/program/slime-tb/terminal-bench
 
 python slime/examples/eval/terminal_bench/tb_server.py \
   --host 0.0.0.0 --port 9050 \
@@ -71,7 +79,7 @@ immediately, then you poll the status endpoint.
 # Submit job
 curl -X POST http://localhost:9050/evaluate \
   -H 'Content-Type: application/json' \
-  -d '{"model_name":"qwen3-8b","api_base":"http://127.0.0.1:30001/v1","dataset_path":"/mnt/data/xinyu/program/my_tb/terminal-bench/tasks","task_id":"hello-world","n_concurrent":1}'
+  -d '{"model_name":"qwen3-8b","api_base":"http://127.0.0.1:30001/v1","dataset_path":"/mnt/data/xinyu/program/slime-tb/terminal-bench/tasks","task_id":"hello-world","n_concurrent":1}'
 ```
 
 The response includes `job_id` and `status_url`, for example:
@@ -87,7 +95,7 @@ curl http://localhost:9050/status/<job_id>
 ```
 
 Where to check outputs:
-- Logs: `/mnt/data/xinyu/program/my_tb/tb_eval_logs/<run_id>.log`
+- Logs: `/mnt/data/xinyu/program/slime-tb/tb_eval_logs/<run_id>.log`
 - Results: `/tmp/tb-eval/<run_id>/results.json`
 
 ## Step 4: Configure Slime eval
@@ -109,7 +117,7 @@ eval:
       timeout_secs: 1200                 # 20 minutes
       model_name: qwen3-8b
       api_base: http://127.0.0.1:30001/v1
-      dataset_path: /mnt/data/xinyu/program/my_tb/terminal-bench/tasks
+      dataset_path: /mnt/data/xinyu/program/slime-tb/terminal-bench/tasks
       n_tasks: 10
       n_concurrent: 1
       # Optional: run specific tasks instead of n_tasks
@@ -153,7 +161,7 @@ python slime/train.py \
 - 404 from TB server: use `url: http://localhost:9050` or `.../evaluate`.
 - Timeouts: keep `timeout_secs` large (TB tasks can compile code).
 - No TB metrics: check `/tmp/tb-eval/<run_id>/results.json` and poll `/status/<job_id>`.
-- No output in terminal: tail the log at `/mnt/data/xinyu/program/my_tb/tb_eval_logs/<run_id>.log`.
+- No output in terminal: tail the log at `/mnt/data/xinyu/program/slime-tb/tb_eval_logs/<run_id>.log`.
 
 ## Reference: the CLI command it runs
 

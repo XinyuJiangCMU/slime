@@ -189,18 +189,15 @@ class TerminalBenchEvaluator:
 
     @staticmethod
     def _collect_metrics(run_dir: Path) -> dict[str, Any]:
-        json_paths = sorted(run_dir.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
-        if not json_paths:
-            logger.warning("No JSON results found in %s", run_dir)
+        metrics_path = run_dir / "results.json"
+        if not metrics_path.exists():
+            logger.warning("Results file missing at %s", metrics_path)
             return {}
 
-        for metrics_path in json_paths:
-            metrics = TerminalBenchEvaluator._extract_metrics(metrics_path)
-            if metrics:
-                return metrics
-
-        logger.warning("No accuracy/n_resolved metrics found in %s", run_dir)
-        return {}
+        metrics = TerminalBenchEvaluator._extract_metrics(metrics_path)
+        if not metrics:
+            logger.warning("No accuracy/n_resolved metrics found in %s", metrics_path)
+        return metrics
 
     @staticmethod
     def _extract_metrics(metrics_path: Path) -> dict[str, Any]:

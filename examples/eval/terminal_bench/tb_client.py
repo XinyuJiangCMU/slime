@@ -16,9 +16,12 @@ class TerminalBenchClient(EvalClient):
         super().__init__(config.name or "terminal_bench")
         self._config = config
         endpoint = (config.url or "").rstrip("/")
-        if endpoint and not endpoint.endswith("/evaluate"):
-            endpoint = f"{endpoint}/evaluate"
-        self._endpoint = endpoint
+        if endpoint.endswith("/evaluate"):
+            base_endpoint = endpoint[: -len("/evaluate")]
+        else:
+            base_endpoint = endpoint
+        self._endpoint = f"{base_endpoint}/evaluate" if base_endpoint else ""
+        self._status_endpoint = f"{base_endpoint}/status" if base_endpoint else ""
         self._timeout_secs = float(config.timeout_secs)
         self._max_retries = max(1, int(config.max_retries))
         self._headers = dict(config.headers or {})
@@ -62,7 +65,13 @@ class TerminalBenchClient(EvalClient):
                 response.raise_for_status()
                 if not response.content:
                     return {}
-                return response.json()
+                body = response.json()
+                if body.get("status") == "completed":
+                    return body
+                job_id = body.get("job_id")
+                if not job_id:
+                    return body
+                return self._poll_status(job_id)
             except requests.RequestException as exc:
                 last_error = exc
                 logger.warning(
@@ -71,3 +80,22 @@ class TerminalBenchClient(EvalClient):
                 if attempt < self._max_retries:
                     time.sleep(min(2**attempt, 30))
         raise EvalDelegateError("Terminal Bench evaluation request failed") from last_error
+
+    def _poll_status(self, job_id: str) -> dict[str, Any]:
+        status_url = f"{self._status_endpoint}/{job_id}"
+        deadline = time.time() + self._timeout_secs
+        while time.time() < deadline:
+            response = self._session.get(status_url, timeout=min(self._timeout_secs, 30), headers=self._headers)
+            response.raise_for_status()
+            if not response.content:
+                time.sleep(2)
+                continue
+            body = response.json()
+            status = body.get("status")
+            if status == "completed":
+                return body
+            if status == "failed":
+                error = body.get("error") or "Terminal Bench job failed"
+                raise EvalDelegateError(error)
+            time.sleep(2)
+        raise EvalDelegateError("Terminal Bench evaluation timed out")

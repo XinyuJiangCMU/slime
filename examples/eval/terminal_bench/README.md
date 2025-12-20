@@ -62,14 +62,28 @@ What it does:
 - Runs `tb run -a terminus-2 -m openai/<model> ... --n-concurrent 8`
 - Waits for completion, then returns `accuracy` and `n_resolved`
 
-## Step 3: Quick sanity check (curl)
+## Step 3: Quick sanity check (curl, async)
 
-Run a single task (e.g. `hello-world`):
+Run a single task (e.g. `hello-world`). The server returns a `job_id`
+immediately, then you poll the status endpoint.
 
 ```bash
+# Submit job
 curl -X POST http://localhost:9050/evaluate \
   -H 'Content-Type: application/json' \
   -d '{"model_name":"qwen3-8b","api_base":"http://127.0.0.1:30001/v1","dataset_path":"/mnt/data/xinyu/program/my_tb/terminal-bench/tasks","task_id":"hello-world","n_concurrent":1}'
+```
+
+The response includes `job_id` and `status_url`, for example:
+
+```json
+{"job_id":"...","status":"queued","status_url":"/status/<job_id>", ...}
+```
+
+Poll status until `completed`:
+
+```bash
+curl http://localhost:9050/status/<job_id>
 ```
 
 Where to check outputs:
@@ -138,7 +152,7 @@ python slime/train.py \
 
 - 404 from TB server: use `url: http://localhost:9050` or `.../evaluate`.
 - Timeouts: keep `timeout_secs` large (TB tasks can compile code).
-- No TB metrics: check `/tmp/tb-eval/<run_id>/results.json`.
+- No TB metrics: check `/tmp/tb-eval/<run_id>/results.json` and poll `/status/<job_id>`.
 - No output in terminal: tail the log at `/mnt/data/xinyu/program/my_tb/tb_eval_logs/<run_id>.log`.
 
 ## Reference: the CLI command it runs

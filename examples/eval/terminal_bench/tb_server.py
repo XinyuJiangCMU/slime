@@ -26,7 +26,7 @@ import sys
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +58,39 @@ class EvalRequestPayload:
     task_id: str | None = None
 
 
+@dataclass
+class JobRecord:
+    job_id: str
+    status: str
+    run_id: str
+    command: str
+    output_dir: str
+    log_path: str
+    raw_metrics: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: float = field(default_factory=time.time)
+    started_at: float | None = None
+    finished_at: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "job_id": self.job_id,
+            "status": self.status,
+            "run_id": self.run_id,
+            "command": self.command,
+            "output_dir": self.output_dir,
+            "log_path": self.log_path,
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+        if self.raw_metrics is not None:
+            payload["raw_metrics"] = self.raw_metrics
+        if self.error:
+            payload["error"] = self.error
+        return payload
+
+
 # ---------------------------------------------------------------------------
 # Configuration + command helpers
 # ---------------------------------------------------------------------------
@@ -85,6 +118,8 @@ class TerminalBenchEvaluator:
     def __init__(self, config: ServerConfig):
         self._config = config
         self._lock = threading.Lock()
+        self._jobs_lock = threading.Lock()
+        self._jobs: dict[str, JobRecord] = {}
         self._config.output_root.mkdir(parents=True, exist_ok=True)
         self._log_root = REPO_ROOT / "tb_eval_logs"
         self._log_root.mkdir(parents=True, exist_ok=True)
@@ -100,20 +135,80 @@ class TerminalBenchEvaluator:
         run_dir = self._config.output_root / run_id
 
         command = self._build_command(payload, run_id)
+        command_str = " ".join(shlex.quote(part) for part in command)
         log_path = self._log_root / f"{run_id}.log"
-        env = self._build_env()
-        logger.info("Starting Terminal Bench run: %s", " ".join(shlex.quote(part) for part in command))
-        with self._lock:
-            self._run_command(command, env=env, log_path=log_path)
 
-        metrics = self._collect_metrics(run_dir)
+        record = JobRecord(
+            job_id=job_id,
+            status="queued",
+            run_id=run_id,
+            command=command_str,
+            output_dir=str(run_dir),
+            log_path=str(log_path),
+        )
+        with self._jobs_lock:
+            self._jobs[job_id] = record
+
+        thread = threading.Thread(
+            target=self._run_job,
+            args=(job_id, payload, run_dir, command, log_path),
+            daemon=True,
+        )
+        thread.start()
+
         return {
             "job_id": job_id,
-            "command": " ".join(shlex.quote(part) for part in command),
+            "status": "queued",
+            "status_url": f"/status/{job_id}",
+            "run_id": run_id,
+            "command": command_str,
             "output_dir": str(run_dir),
             "log_path": str(log_path),
-            "raw_metrics": metrics,
         }
+
+    def _run_job(
+        self,
+        job_id: str,
+        payload: EvalRequestPayload,
+        run_dir: Path,
+        command: list[str],
+        log_path: Path,
+    ) -> None:
+        with self._jobs_lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                return
+            record.status = "running"
+            record.started_at = time.time()
+
+        env = self._build_env()
+        logger.info("Starting Terminal Bench run: %s", " ".join(shlex.quote(part) for part in command))
+        try:
+            with self._lock:
+                self._run_command(command, env=env, log_path=log_path)
+            metrics = self._collect_metrics(run_dir)
+            with self._jobs_lock:
+                record = self._jobs.get(job_id)
+                if record is None:
+                    return
+                record.status = "completed"
+                record.raw_metrics = metrics
+                record.finished_at = time.time()
+        except Exception as exc:  # noqa: BLE001
+            with self._jobs_lock:
+                record = self._jobs.get(job_id)
+                if record is None:
+                    return
+                record.status = "failed"
+                record.error = str(exc)
+                record.finished_at = time.time()
+
+    def get_job_status(self, job_id: str) -> dict[str, Any] | None:
+        with self._jobs_lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                return None
+            return record.to_dict()
 
     def _build_command(self, payload: EvalRequestPayload, run_id: str) -> list[str]:
         # 1. Normalize model name (add openai/ prefix)
@@ -273,6 +368,13 @@ def build_app(evaluator: TerminalBenchEvaluator) -> Flask:
         except Exception as exc:  # noqa: BLE001
             logger.exception("Evaluation failed")
             return jsonify({"error": str(exc)}), 500
+
+    @app.get("/status/<job_id>")
+    def status_endpoint(job_id: str):
+        status = evaluator.get_job_status(job_id)
+        if status is None:
+            return jsonify({"error": "job not found"}), 404
+        return jsonify(status)
 
     return app
 

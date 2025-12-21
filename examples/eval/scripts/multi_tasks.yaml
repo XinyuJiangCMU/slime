@@ -34,16 +34,10 @@ eval:
     #     - name: hle
     #       max_response_len: 32768
     - name: tb
-      url: http://172.17.0.1:9060/evaluate
-      timeout_secs: 14400
-      max_retries: 1
-      defaults:
-        agent: terminus-2
-        model: openai/qwen3-8b
-        n_concurrent: 8
-        agent_kwargs:
-          api_base: http://127.0.0.1:30002/v1
-      datasets:
-        - name: terminal-bench-core
-          dataset: terminal-bench-core==0.1.1
-          task_id: hello-world
+      url: http://127.0.0.1:9060/evaluate
+      model_name: openai/qwen3-8b
+      api_base: http://127.0.0.1:30002/v1
+      n_concurrent: 8
+      n_tasks: 1
+      task_ids:
+        - hello-world

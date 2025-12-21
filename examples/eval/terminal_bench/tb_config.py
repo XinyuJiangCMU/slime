@@ -16,29 +16,35 @@ class TerminalBenchConfig(EvalEnvConfig):
     n_tasks: int = 10
     n_concurrent: int = 4
     dataset_path: str | None = None
+    task_id: str | None = None
     task_ids: list[str] = field(default_factory=list)
 
     @classmethod
     def parse(cls, args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]) -> TerminalBenchConfig:
-        base_cfg: TerminalBenchConfig = super().parse(raw_env_config, defaults)
-        model_name = raw_env_config.get("model_name")
+        clean_raw = dict(raw_env_config or {})
+        clean_raw.pop("type", None)
+        base_cfg: TerminalBenchConfig = super().parse(clean_raw, defaults)
+        model_name = clean_raw.get("model_name")
         if model_name is not None:
             base_cfg.model_name = str(model_name)
-        api_base = raw_env_config.get("api_base")
+        api_base = clean_raw.get("api_base")
         if api_base is not None:
             base_cfg.api_base = str(api_base)
-        n_tasks = raw_env_config.get("n_tasks")
+        n_tasks = clean_raw.get("n_tasks")
         if n_tasks is not None:
             base_cfg.n_tasks = int(n_tasks)
-        n_concurrent = raw_env_config.get("n_concurrent")
+        n_concurrent = clean_raw.get("n_concurrent")
         if n_concurrent is not None:
             base_cfg.n_concurrent = int(n_concurrent)
-        dataset_path = raw_env_config.get("dataset_path")
+        dataset_path = clean_raw.get("dataset_path")
         if dataset_path is not None:
             base_cfg.dataset_path = str(dataset_path)
-        task_ids = raw_env_config.get("task_ids")
+        task_id = clean_raw.get("task_id")
+        if task_id is not None:
+            base_cfg.task_id = str(task_id)
+        task_ids = clean_raw.get("task_ids")
         if task_ids is None:
-            task_ids = raw_env_config.get("task_id")
+            task_ids = task_id
         if task_ids is not None:
             if isinstance(task_ids, (list, tuple)):
                 base_cfg.task_ids = [str(item) for item in task_ids if item]

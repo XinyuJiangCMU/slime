@@ -4,12 +4,14 @@
 # external Terminal Bench server via the eval_delegate_rollout wrapper.
 
 # Clean up any stale processes from a previous run.
-pkill -9 sglang || true
+pkill -9 sglang
 sleep 3
-ray stop --force || true
-pkill -9 ray || true
+ray stop --force
+pkill -9 ray
+pkill -9 python
 sleep 3
-pkill -9 ray || true
+pkill -9 ray
+pkill -9 python
 
 set -ex
 
@@ -45,20 +47,18 @@ CKPT_ARGS=(
 )
 
 ROLLOUT_ARGS=(
-   # --prompt-data /root/dapo-math-17k/dapo-math-17k.jsonl
-   --prompt-data /mnt/data/zhiyao/tb_evaluation/tb_eval_smoke/eval_smoke.jsonl
+   --prompt-data /root/dapo-math-17k/dapo-math-17k.jsonl
    --input-key prompt
    --label-key label
    --apply-chat-template
    --rollout-shuffle
    --rm-type deepscaler
    # --num-rollout 3000
-   --num-rollout 0
+   --num-rollout 1
    --rollout-batch-size 32
    --n-samples-per-prompt 8
    --rollout-max-response-len 8192
    --rollout-temperature 0.8
-
    --global-batch-size 256
    --balance-data
 )
@@ -112,16 +112,16 @@ WANDB_ARGS=(
    --wandb-mode disabled
 )
 
-ROUTER_IP=$(hostname -I | awk '{print $1}')
+# ROUTER_IP=$(hostname -I | awk '{print $1}')
 
 SGLANG_ARGS=(
-   --use-slime-router
+   # --use-slime-router
    --rollout-num-gpus-per-engine 1
-   --sglang-mem-fraction-static 0.5
-   --sglang-cuda-graph-max-bs 16
+   --sglang-mem-fraction-static 0.7
+   # --sglang-cuda-graph-max-bs 16
    # set up sglang router
    # --sglang-router-ip "${ROUTER_IP}"
-   --sglang-router-port 30001
+   --sglang-router-port 30005
 )
 
 MISC_ARGS=(
@@ -132,9 +132,20 @@ MISC_ARGS=(
    --attention-backend flash
 )
 
-export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-export CUDA_VISIBLE_DEVICES=4
-ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 1 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
+# export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
+export MASTER_ADDR=${MASTER_ADDR:-"10.102.22.21"}
+export CUDA_VISIBLE_DEVICES=6,7
+
+unset RAY_ADDRESS RAY_REDIS_ADDRESS RAY_GCS_ADDRESS
+export RAY_TMPDIR=/tmp/ray_zhiyao
+ray start --head --node-ip-address ${MASTER_ADDR} --port 6380 --num-gpus 2 \
+            --disable-usage-stats \
+            --dashboard-host=0.0.0.0 \
+            --dashboard-port=8266 \
+            --dashboard-agent-listen-port 52366 \
+            --dashboard-agent-grpc-port 52367 \
+            --runtime-env-agent-port 52368
+
 
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
@@ -143,12 +154,14 @@ RUNTIME_ENV_JSON="{
   }
 }"
 
-ray job submit --address="http://127.0.0.1:8265" \
+sleep 5
+
+ray job submit --address="http://${MASTER_ADDR}:8266" \
    --working-dir "${REPO_ROOT}" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
    -- python3 train.py \
    --actor-num-nodes 1 \
-   --actor-num-gpus-per-node 1 \
+   --actor-num-gpus-per-node 2 \
    --colocate \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \

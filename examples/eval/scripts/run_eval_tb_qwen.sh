@@ -48,6 +48,7 @@ CKPT_ARGS=(
 
 ROLLOUT_ARGS=(
    --prompt-data /root/dapo-math-17k/dapo-math-17k.jsonl
+   # --prompt-data /mnt/data/zhiyao/tb_evaluation/tb_eval_smoke/eval_smoke.jsonl
    --input-key prompt
    --label-key label
    --apply-chat-template
@@ -134,7 +135,7 @@ MISC_ARGS=(
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 # export MASTER_ADDR=${MASTER_ADDR:-"10.102.22.21"}
-export CUDA_VISIBLE_DEVICES=2,3
+export CUDA_VISIBLE_DEVICES=0,1
 
 # unset RAY_ADDRESS RAY_REDIS_ADDRESS RAY_GCS_ADDRESS
 # export RAY_TMPDIR=/tmp/ray_zhiyao

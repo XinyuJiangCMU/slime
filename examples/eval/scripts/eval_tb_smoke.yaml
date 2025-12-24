@@ -12,6 +12,7 @@ eval:
   delegate:
     - name: terminal_bench
       type: examples.eval.terminal_bench.tb_config.build_terminal_bench_config
+      # url: http://host.docker.internal:9051
       url: http://172.17.0.1:9051
       timeout_secs: 14400
       max_retries: 1

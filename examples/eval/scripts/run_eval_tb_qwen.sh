@@ -105,22 +105,15 @@ OPTIMIZER_ARGS=(
 )
 
 WANDB_ARGS=(
-   # --use-wandb
-   # --wandb-project slime-eval
-   # --wandb-group qwen3-8b-eval
-   # --wandb-key ${WANDB_KEY}
-   --wandb-mode disabled
+   --use-wandb
+   --wandb-project slime-eval
+   --wandb-group qwen3-8b-eval
+   --wandb-key ${WANDB_KEY}
 )
 
-# ROUTER_IP=$(hostname -I | awk '{print $1}')
-
 SGLANG_ARGS=(
-   # --use-slime-router
    --rollout-num-gpus-per-engine 1
    --sglang-mem-fraction-static 0.7
-   # --sglang-cuda-graph-max-bs 16
-   # set up sglang router
-   # --sglang-router-ip "${ROUTER_IP}"
    --sglang-router-port 30005
 )
 
@@ -132,12 +125,12 @@ MISC_ARGS=(
    --attention-backend flash
 )
 
-# export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-export MASTER_ADDR=${MASTER_ADDR:-"10.102.22.21"}
-export CUDA_VISIBLE_DEVICES=6,7
+export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
+# export MASTER_ADDR=${MASTER_ADDR:-"10.102.22.21"}
+export CUDA_VISIBLE_DEVICES=2,3
 
-unset RAY_ADDRESS RAY_REDIS_ADDRESS RAY_GCS_ADDRESS
-export RAY_TMPDIR=/tmp/ray_zhiyao
+# unset RAY_ADDRESS RAY_REDIS_ADDRESS RAY_GCS_ADDRESS
+# export RAY_TMPDIR=/tmp/ray_zhiyao
 ray start --head --node-ip-address ${MASTER_ADDR} --port 6380 --num-gpus 2 \
             --disable-usage-stats \
             --dashboard-host=0.0.0.0 \
@@ -154,7 +147,7 @@ RUNTIME_ENV_JSON="{
   }
 }"
 
-sleep 5
+# sleep 5
 
 ray job submit --address="http://${MASTER_ADDR}:8266" \
    --working-dir "${REPO_ROOT}" \

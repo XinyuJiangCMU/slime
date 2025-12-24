@@ -57,6 +57,7 @@ class EvalRequestPayload:
     dataset_path: str | None = None
     task_ids: list[str] | None = None
     task_id: str | None = None
+    n_attempts: int | None = None
 
 
 @dataclass
@@ -243,6 +244,9 @@ class TerminalBenchEvaluator:
 
         if payload.dataset_path:
             cmd.extend(["--dataset-path", payload.dataset_path])
+        
+        if payload.n_attempts is not None:
+            cmd.extend(["--n-attempts", str(payload.n_attempts)])
 
         if task_ids:
             for task_id in task_ids:

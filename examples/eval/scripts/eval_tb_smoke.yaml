@@ -24,4 +24,6 @@ eval:
       api_base: http://127.0.1.1:30005/v1
       dataset_path: /mnt/data/xinyu/program/slime-tb/terminal-bench/tasks
       # task_id: hello-world
+      # n_tasks: 10
+      n_attempts: 3
       n_concurrent: 8

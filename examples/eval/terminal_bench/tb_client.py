@@ -50,6 +50,8 @@ class TerminalBenchClient(EvalClient):
             payload["dataset_path"] = self._config.dataset_path
         if self._config.task_ids:
             payload["task_ids"] = list(self._config.task_ids)
+        if self._config.n_attempts is not None:
+            payload["n_attempts"] = self._config.n_attempts
         return payload
 
     def _request(self, payload: dict[str, Any]) -> dict[str, Any]:

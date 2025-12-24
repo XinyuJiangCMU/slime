@@ -12,9 +12,9 @@ class TerminalBenchConfig(EvalEnvConfig):
     """Environment configuration shared by the Terminal Bench client/server."""
 
     model_name: str = "qwen3-8b"
-    api_base: str = "http://172.17.0.1:30001/v1"
-    n_tasks: int = 10
-    n_concurrent: int = 4
+    api_base: str = "http://127.0.1.1:30001/v1"
+    n_tasks: int | None = None
+    n_concurrent: int = 8
     dataset_path: str | None = None
     task_id: str | None = None
     task_ids: list[str] = field(default_factory=list)

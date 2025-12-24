@@ -26,6 +26,7 @@ import sys
 import threading
 import time
 import uuid
+import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -307,35 +308,49 @@ class TerminalBenchEvaluator:
             logger.warning("Failed to parse %s: %s", metrics_path, exc)
             return {}
 
-        accuracy = metrics_data.get("accuracy")
-        n_resolved = metrics_data.get("n_resolved")
-
-        if accuracy is None or n_resolved is None:
-            results = metrics_data.get("results")
-            if isinstance(results, list):
-                resolved = sum(1 for result in results if result.get("is_resolved"))
-                total = len(results)
-                if n_resolved is None:
-                    n_resolved = resolved
-                if accuracy is None:
-                    accuracy = resolved / total if total else 0.0
-
-        if accuracy is None or n_resolved is None:
-            return {}
-
         metrics: dict[str, Any] = {}
-        if accuracy is not None:
-            try:
-                metrics["accuracy"] = float(accuracy)
-            except (TypeError, ValueError):
-                logger.warning("Non-numeric accuracy in %s: %r", metrics_path, accuracy)
-        if n_resolved is not None:
-            try:
-                metrics["n_resolved"] = int(n_resolved)
-            except (TypeError, ValueError):
-                logger.warning("Non-numeric n_resolved in %s: %r", metrics_path, n_resolved)
-        if "accuracy" not in metrics or "n_resolved" not in metrics:
-            return {}
+        
+        # core metrics
+        accuracy = metrics_data.get("accuracy")
+        if isinstance(accuracy, (int, float)):
+            metrics["accuracy"] = float(accuracy)
+
+        n_resolved = metrics_data.get("n_resolved")
+        if isinstance(n_resolved, (int, float)):
+            metrics["n_resolved"] = int(n_resolved)
+
+        n_unresolved = metrics_data.get("n_unresolved")
+        if isinstance(n_unresolved, (int, float)):
+            metrics["n_unresolved"] = int(n_unresolved)
+
+        # pass@k flatten
+        pass_at_k = metrics_data.get("pass_at_k")
+        if isinstance(pass_at_k, dict):
+            for k, v in pass_at_k.items():
+                if isinstance(v, (int, float)):
+                    metrics[f"pass_at_k/{k}"] = float(v)
+
+        # token stats from per-task results
+        results = metrics_data.get("results")
+        if isinstance(results, list):
+            input_tokens = [
+                r.get("total_input_tokens")
+                for r in results
+                if isinstance(r, dict) and isinstance(r.get("total_input_tokens"), (int, float))
+            ]
+            output_tokens = [
+                r.get("total_output_tokens")
+                for r in results
+                if isinstance(r, dict) and isinstance(r.get("total_output_tokens"), (int, float))
+            ]
+
+            if input_tokens:
+                metrics["total_input_tokens_mean"] = float(statistics.mean(input_tokens))
+                metrics["total_input_tokens_median"] = float(statistics.median(input_tokens))
+            if output_tokens:
+                metrics["total_output_tokens_mean"] = float(statistics.mean(output_tokens))
+                metrics["total_output_tokens_median"] = float(statistics.median(output_tokens))
+
         return metrics
 
 

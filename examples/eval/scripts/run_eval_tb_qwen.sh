@@ -121,7 +121,7 @@ SGLANG_ARGS=(
    # --sglang-cuda-graph-max-bs 16
    # set up sglang router
    # --sglang-router-ip "${ROUTER_IP}"
-   --sglang-router-port 30005
+   --sglang-router-port 30006
 )
 
 MISC_ARGS=(
@@ -132,19 +132,22 @@ MISC_ARGS=(
    --attention-backend flash
 )
 
-# export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-export MASTER_ADDR=${MASTER_ADDR:-"10.102.22.21"}
-export CUDA_VISIBLE_DEVICES=6,7
+export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
+# export MASTER_ADDR=${MASTER_ADDR:-"10.102.22.21"}
+export CUDA_VISIBLE_DEVICES=2,3
 
-unset RAY_ADDRESS RAY_REDIS_ADDRESS RAY_GCS_ADDRESS
-export RAY_TMPDIR=/tmp/ray_zhiyao
-ray start --head --node-ip-address ${MASTER_ADDR} --port 6380 --num-gpus 2 \
-            --disable-usage-stats \
-            --dashboard-host=0.0.0.0 \
-            --dashboard-port=8266 \
-            --dashboard-agent-listen-port 52366 \
-            --dashboard-agent-grpc-port 52367 \
-            --runtime-env-agent-port 52368
+# unset RAY_ADDRESS RAY_REDIS_ADDRESS RAY_GCS_ADDRESS
+# export RAY_TMPDIR=/tmp/ray_zhiyao
+ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 2 --disable-usage-stats \
+            --dashboard-host=0.0.0.0 --dashboard-port=8265
+
+# ray start --head --node-ip-address ${MASTER_ADDR} --port 6380 --num-gpus 2 \
+            # --disable-usage-stats \
+            # --dashboard-host=0.0.0.0 \
+            # --dashboard-port=8266 \
+            # --dashboard-agent-listen-port 52366 \
+            # --dashboard-agent-grpc-port 52367 \
+            # --runtime-env-agent-port 52368
 
 
 RUNTIME_ENV_JSON="{
@@ -156,7 +159,7 @@ RUNTIME_ENV_JSON="{
 
 sleep 5
 
-ray job submit --address="http://${MASTER_ADDR}:8266" \
+ray job submit --address="http://${MASTER_ADDR}:8265" \
    --working-dir "${REPO_ROOT}" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
    -- python3 train.py \

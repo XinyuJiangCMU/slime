@@ -18,7 +18,7 @@ eval:
     - name: terminal_bench
       type: examples.eval.terminal_bench.tb_config.build_terminal_bench_config
       url: http://172.17.0.1:9052
-      timeout_secs: 14400
+      timeout_secs: 28800
       max_retries: 1
       model_name: qwen3-8b
       api_base: http://127.0.1.1:30005/v1

@@ -58,6 +58,7 @@ class EvalRequestPayload:
     task_ids: list[str] | None = None
     task_id: str | None = None
     n_attempts: int | None = None
+    metric_prefix: str | None = None
 
 
 @dataclass
@@ -189,6 +190,8 @@ class TerminalBenchEvaluator:
             with self._lock:
                 self._run_command(command, env=env, log_path=log_path)
             metrics = self._collect_metrics(run_dir)
+            if payload.metric_prefix:
+                metrics = {payload.metric_prefix: metrics}
             with self._jobs_lock:
                 record = self._jobs.get(job_id)
                 if record is None:

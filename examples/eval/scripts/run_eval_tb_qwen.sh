@@ -126,11 +126,8 @@ MISC_ARGS=(
 )
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-# export MASTER_ADDR=${MASTER_ADDR:-"10.102.22.21"}
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=6,7
 
-# unset RAY_ADDRESS RAY_REDIS_ADDRESS RAY_GCS_ADDRESS
-# export RAY_TMPDIR=/tmp/ray_zhiyao
 ray start --head --node-ip-address ${MASTER_ADDR} --port 6380 --num-gpus 2 \
             --disable-usage-stats \
             --dashboard-host=0.0.0.0 \

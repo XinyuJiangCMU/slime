@@ -45,6 +45,7 @@ class TerminalBenchClient(EvalClient):
             "api_base": self._config.api_base,
             "n_tasks": self._config.n_tasks,
             "n_concurrent": self._config.n_concurrent,
+            "metric_prefix": self._config.name,
         }
         if self._config.dataset_path:
             payload["dataset_path"] = self._config.dataset_path

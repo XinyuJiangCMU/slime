@@ -35,14 +35,10 @@ source "${REPO_ROOT}/scripts/models/qwen3-8B.sh"
 # Store eval/delegate settings in a YAML config similar to examples/eval_multi_task.
 EVAL_CONFIG_PATH=${TB_EVAL_CONFIG_PATH:-"${REPO_ROOT}/examples/eval/scripts/eval_tb_smoke.yaml"}
 
-# DEBUG_ARGS=(
-#   --debug-rollout-only
-# )
-
 CKPT_ARGS=(
    --hf-checkpoint ${MODEL_DIR}/OpenThinker-Agent-v1
    --ref-load ${MODEL_DIR}/OpenThinker-Agent-v1_torch_dist
-   --load ${MODEL_DIR}/OpenThinker-Agent-v1_slime/
+   # --load ${MODEL_DIR}/OpenThinker-Agent-v1_slime/
    --save ${MODEL_DIR}/OpenThinker-Agent-v1_slime/
    --save-interval 20
 )
@@ -54,7 +50,8 @@ ROLLOUT_ARGS=(
    --apply-chat-template
    --rollout-shuffle
    --rm-type deepscaler
-   --num-rollout 3000
+   # --num-rollout 3000
+   --num-rollout 1
    --rollout-batch-size 32
    --n-samples-per-prompt 8
    --rollout-max-response-len 8192
@@ -64,7 +61,8 @@ ROLLOUT_ARGS=(
 )
 
 EVAL_ARGS=(
-   --eval-interval 5
+   # --eval-interval 5
+   --eval-interval 1
    --eval-config "${EVAL_CONFIG_PATH}"
    --eval-function-path examples.eval.eval_delegate_rollout.generate_rollout
 )
@@ -116,6 +114,11 @@ SGLANG_ARGS=(
    --sglang-router-port 30005
 )
 
+# OFFLOAD_ARGS=(
+#    --no-offload-rollout
+#    --no-offload-train
+# )
+
 MISC_ARGS=(
    --attention-dropout 0.0
    --hidden-dropout 0.0
@@ -136,14 +139,22 @@ ray start --head --node-ip-address ${MASTER_ADDR} --port 6380 --num-gpus 2 \
             --runtime-env-agent-port 52368
 
 
+CUDNN_LIB="$(python - <<'PY'
+import nvidia.cudnn, os
+print(os.path.join(list(nvidia.cudnn.__path__)[0], "lib"))
+PY
+)"
+export LD_LIBRARY_PATH="$CUDNN_LIB:${LD_LIBRARY_PATH:-}"
+
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
     \"PYTHONPATH\": \"/root/Megatron-LM/\",
-    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\"
+    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
+    \"LD_LIBRARY_PATH\": \"${LD_LIBRARY_PATH}\",
+    \"CUDNN_LOGERR_DBG\": \"1\",
+    \"CUDNN_LOGDEST_DBG\": \"stderr\"
   }
 }"
-
-# sleep 5
 
 ray job submit --address="http://${MASTER_ADDR}:8266" \
    --working-dir "${REPO_ROOT}" \
@@ -161,5 +172,4 @@ ray job submit --address="http://${MASTER_ADDR}:8266" \
    ${PERF_ARGS[@]} \
    ${EVAL_ARGS[@]} \
    ${SGLANG_ARGS[@]} \
-   # ${DEBUG_ARGS[@]} \
    ${MISC_ARGS[@]}

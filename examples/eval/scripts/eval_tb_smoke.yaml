@@ -6,19 +6,14 @@ eval:
     top_k: -1
     max_response_len: 24576
   datasets: # these eval tasks go through slime dataset config and default rollout function (slime.rollout.sglang_rollout.generate_rollout)
-    # - name: gpqa    # huggingface-cli download --repo-type dataset zyzshishui0627/gpqa_diamond --local-dir /root/gpqa
-    #   path: /root/gpqa/gpqa_eval.jsonl
-    #   rm_type: gpqa
-    #   n_samples_per_eval_prompt: 2
-    # - name: ifbench   # huggingface-cli download --repo-type dataset zyzshishui0627/IFBench --local-dir /root/ifbench
-    #   path: /root/ifbench/IFBench_eval.jsonl
-    #   rm_type: ifbench
-    #   n_samples_per_eval_prompt: 1
-    - name: smoke
-      path: /mnt/data/zhiyao/tb_evaluation/tb_eval_smoke/eval_smoke.jsonl
-      rm_type: deepscaler
+    - name: gpqa    # huggingface-cli download --repo-type dataset zyzshishui0627/gpqa_diamond --local-dir /root/gpqa
+      path: /root/gpqa/gpqa_eval.jsonl
+      rm_type: gpqa
+      n_samples_per_eval_prompt: 2
+    - name: ifbench   # huggingface-cli download --repo-type dataset zyzshishui0627/IFBench --local-dir /root/ifbench
+      path: /root/ifbench/IFBench_eval.jsonl
+      rm_type: ifbench
       n_samples_per_eval_prompt: 1
-      max_response_len: 128
   delegate:
     - name: terminal_bench
       # type: examples.eval.terminal_bench.tb_config.build_terminal_bench_config

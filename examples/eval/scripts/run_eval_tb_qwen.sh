@@ -114,11 +114,6 @@ SGLANG_ARGS=(
    --sglang-router-port 30005
 )
 
-# OFFLOAD_ARGS=(
-#    --no-offload-rollout
-#    --no-offload-train
-# )
-
 MISC_ARGS=(
    --attention-dropout 0.0
    --hidden-dropout 0.0
@@ -139,20 +134,10 @@ ray start --head --node-ip-address ${MASTER_ADDR} --port 6380 --num-gpus 2 \
             --runtime-env-agent-port 52368
 
 
-CUDNN_LIB="$(python - <<'PY'
-import nvidia.cudnn, os
-print(os.path.join(list(nvidia.cudnn.__path__)[0], "lib"))
-PY
-)"
-export LD_LIBRARY_PATH="$CUDNN_LIB:${LD_LIBRARY_PATH:-}"
-
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
     \"PYTHONPATH\": \"/root/Megatron-LM/\",
-    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
-    \"LD_LIBRARY_PATH\": \"${LD_LIBRARY_PATH}\",
-    \"CUDNN_LOGERR_DBG\": \"1\",
-    \"CUDNN_LOGDEST_DBG\": \"stderr\"
+    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\"
   }
 }"
 

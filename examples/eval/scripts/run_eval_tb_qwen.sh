@@ -17,7 +17,7 @@ set -ex
 
 export PYTHONBUFFERED=16
 
-MODEL_DIR="${MODEL_DIR:-/mnt/data/xinyu}"
+MODEL_DIR="${MODEL_DIR:-/opt}"
 export MODEL_DIR
 
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
@@ -111,7 +111,7 @@ WANDB_ARGS=(
 SGLANG_ARGS=(
    --rollout-num-gpus-per-engine 1
    --sglang-mem-fraction-static 0.7
-   --sglang-router-port 30005
+   --sglang-router-port 30006
 )
 
 MISC_ARGS=(
@@ -122,17 +122,18 @@ MISC_ARGS=(
    --attention-backend flash
 )
 
+# export MASTER_ADDR=${MASTER_ADDR:-"10.102.22.22"}
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 export CUDA_VISIBLE_DEVICES=6,7
 
-ray start --head --node-ip-address ${MASTER_ADDR} --port 6380 --num-gpus 2 \
-            --disable-usage-stats \
-            --dashboard-host=0.0.0.0 \
-            --dashboard-port=8266 \
-            --dashboard-agent-listen-port 52366 \
-            --dashboard-agent-grpc-port 52367 \
-            --runtime-env-agent-port 52368
+# ray start --head --node-ip-address ${MASTER_ADDR} --port=6381 --num-gpus 2 --disable-usage-stats \
+#             --dashboard-host=0.0.0.0 --dashboard-port=8266 --dashboard-agent-listen-port 52366 \
+#             --dashboard-agent-grpc-port 52367 --runtime-env-agent-port 52368
+# ray start --head --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
+ray start --head --node-ip-address ${MASTER_ADDR} --port=6380 --num-gpus 2 --disable-usage-stats \
+            --dashboard-host=0.0.0.0 --dashboard-port=8266 --dashboard-agent-listen-port 52366 \
+            --dashboard-agent-grpc-port 52367 --runtime-env-agent-port 52368
 
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
@@ -140,6 +141,8 @@ RUNTIME_ENV_JSON="{
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\"
   }
 }"
+
+sleep 5
 
 ray job submit --address="http://${MASTER_ADDR}:8266" \
    --working-dir "${REPO_ROOT}" \

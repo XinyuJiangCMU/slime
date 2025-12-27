@@ -1,10 +1,6 @@
 # Terminal Bench Eval (Slime)
 
-This folder wires Terminal Bench (TB) into Slime as an eval delegate. The TB
-run happens on the host via the `tb` CLI, and Slime reads back `accuracy` and
-`n_resolved`.
-
-This guide is written for ML/algorithm folks who just want it to run.
+This folder wires Terminal Bench (TB) into Slime as an eval delegate. The TB run happens on the host via the `tb` CLI, and Slime reads back aggregated metrics such as `accuracy`, `n_resolved`, `n_unresolved`, `pass_at_k/*`, and token stats like `total_input_tokens_mean/median` and `total_output_tokens_mean/median`.
 
 ## What runs where
 
@@ -86,7 +82,9 @@ python slime/examples/eval/terminal_bench/tb_server.py \
 What it does:
 - Uses `OPENAI_API_KEY=EMPTY`
 - Runs `tb run -a terminus-2 -m openai/<model> ... --n-concurrent 8`
-- Waits for completion, then returns `accuracy` and `n_resolved`
+- Waits for completion, then returns `accuracy`, `n_resolved`,
+  `n_unresolved`, `pass_at_k/*`, and token stats such as
+  `total_input_tokens_mean/median` and `total_output_tokens_mean/median`
 
 ## 6) Run the eval script (example)
 

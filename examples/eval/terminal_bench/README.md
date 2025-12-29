@@ -23,7 +23,7 @@ This folder wires Terminal Bench (TB) into Slime as an eval delegate. The TB run
 ## 1) Get the code (host)
 
 ```bash
-git clone --branch feat/tb-eval-integration https://github.com/XinyuJiangCMU/slime.git
+git clone https://github.com/THUDM/slime.git
 git clone https://github.com/laude-institute/terminal-bench
 ```
 

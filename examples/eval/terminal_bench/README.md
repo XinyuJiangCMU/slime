@@ -88,7 +88,7 @@ What it does:
 
 ## 6) Run the eval script (example)
 
-If you use the provided Qwen eval launcher:
+If you use the provided Qwen eval launcher, run the following command inside the Slime Docker container:
 
 ```bash
 bash slime/examples/eval/scripts/run_eval_tb_qwen.sh 2>&1 | tee run.log

@@ -16,6 +16,7 @@ pkill -9 python
 set -ex
 
 export PYTHONBUFFERED=16
+export SLIME_HOST_IP=${SLIME_HOST_IP:-"127.0.0.1"}
 
 MODEL_DIR="${MODEL_DIR:-/mnt/data/xinyu}"
 export MODEL_DIR
@@ -50,8 +51,8 @@ ROLLOUT_ARGS=(
    --apply-chat-template
    --rollout-shuffle
    --rm-type deepscaler
-   # --num-rollout 3000
-   --num-rollout 1
+   --num-rollout 3000
+   # --num-rollout 1
    --rollout-batch-size 32
    --n-samples-per-prompt 8
    --rollout-max-response-len 8192
@@ -61,8 +62,8 @@ ROLLOUT_ARGS=(
 )
 
 EVAL_ARGS=(
-   # --eval-interval 5
-   --eval-interval 1
+   --eval-interval 5
+   # --eval-interval 1
    --eval-config "${EVAL_CONFIG_PATH}"
    --eval-function-path examples.eval.eval_delegate_rollout.generate_rollout
 )

@@ -16,14 +16,13 @@ eval:
       n_samples_per_eval_prompt: 1
   delegate:
     - name: terminal_bench
-      # type: examples.eval.terminal_bench.tb_config.build_terminal_bench_config
-      url: http://172.17.0.1:9052
+      url: http://172.17.0.1:9051
       timeout_secs: 86400  # 24 hours
       max_retries: 1 # HTTP request retries from Slime to the TB server
       model_name: qwen3-8b
       api_base: http://127.0.1.1:30005/v1
       dataset_path: /mnt/data/xinyu/program/slime-tb/terminal-bench/tasks
-      task_id: hello-world
+      # task_id: hello-world
       # n_tasks: 10
       n_attempts: 2 # TB task-level retries (per task within tb run)
       n_concurrent: 8

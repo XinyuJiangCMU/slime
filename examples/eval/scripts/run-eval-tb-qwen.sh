@@ -33,10 +33,10 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." &>/dev/null && pwd)"
 source "${REPO_ROOT}/scripts/models/qwen3-8B.sh"
 
 # Store eval/delegate settings in a YAML config similar to examples/eval_multi_task.
-EVAL_CONFIG_PATH=${TB_EVAL_CONFIG_PATH:-"${REPO_ROOT}/examples/eval/scripts/eval_tb_smoke.yaml"}
+EVAL_CONFIG_PATH=${TB_EVAL_CONFIG_PATH:-"${REPO_ROOT}/examples/eval/scripts/eval_tb_example.yaml"}
 
 CKPT_ARGS=(
-   --hf-checkpoint ${MODEL_DIR}/OpenThinker-Agent-v1
+   --hf-checkpoint ${MODEL_DIR}/OpenThinker-Agent-v1 # huggingface-cli download open-thoughts/OpenThinker-Agent-v1
    --ref-load ${MODEL_DIR}/OpenThinker-Agent-v1_torch_dist
    # --load ${MODEL_DIR}/OpenThinker-Agent-v1_slime/
    --save ${MODEL_DIR}/OpenThinker-Agent-v1_slime/

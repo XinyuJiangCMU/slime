@@ -124,7 +124,7 @@ class TerminalBenchEvaluator:
         self._jobs_lock = threading.Lock()
         self._jobs: dict[str, JobRecord] = {}
         self._config.output_root.mkdir(parents=True, exist_ok=True)
-        self._log_root = REPO_ROOT / "tb_eval_logs"
+        self._log_root = REPO_ROOT.parent / "tb_eval_logs"
         self._log_root.mkdir(parents=True, exist_ok=True)
 
     def evaluate(self, payload: EvalRequestPayload) -> dict[str, Any]:
@@ -404,8 +404,7 @@ def build_app(evaluator: TerminalBenchEvaluator) -> Flask:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
-
-
+git
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Terminal Bench evaluation HTTP server.")
     parser.add_argument("--host", type=str, default="0.0.0.0")

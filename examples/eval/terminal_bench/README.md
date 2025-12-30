@@ -91,5 +91,5 @@ What it does:
 If you use the provided Qwen eval launcher, run the following command inside the Slime Docker container:
 
 ```bash
-bash slime/examples/eval/scripts/run_eval_tb_qwen.sh 2>&1 | tee run.log
+bash slime/examples/eval/scripts/run-eval-tb-qwen.sh 2>&1 | tee run.log
 ```

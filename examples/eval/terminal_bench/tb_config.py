@@ -57,6 +57,37 @@ class TerminalBenchConfig(EvalEnvConfig):
                 base_cfg.task_ids = [str(task_ids)]
         return base_cfg
 
+    @classmethod
+    def parse(cls, args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]) -> TerminalBenchConfig:
+        clean_raw = dict(raw_env_config or {})
+        clean_raw.pop("type", None)
+        base_cfg: TerminalBenchConfig = super().parse(clean_raw, defaults)
+
+        field_casts = {
+            "model_name": str,
+            "api_base": str,
+            "n_attempts": int,
+            "n_tasks": int,
+            "n_concurrent": int,
+            "dataset_path": str,
+            "task_id": str,
+        }
+
+        for key, caster in field_casts.items():
+            value = clean_raw.get(key)
+            if value is not None:
+                setattr(base_cfg, key, caster(value))
+
+        task_ids = clean_raw.get("task_ids") or clean_raw.get("task_id")
+        if task_ids is not None:
+            if isinstance(task_ids, (list, tuple)):
+                base_cfg.task_ids = [str(item) for item in task_ids if item]
+            else:
+                base_cfg.task_ids = [str(task_ids)]
+
+        return base_cfg
+
+
 
 def build_terminal_bench_config(args, raw_env_config: Mapping[str, Any], defaults: Mapping[str, Any]):
     return TerminalBenchConfig.parse(args, raw_env_config, defaults)

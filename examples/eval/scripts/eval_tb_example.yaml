@@ -22,7 +22,7 @@ eval:
       model_name: qwen3-8b
       api_base: http://127.0.0.1:30005/v1 # Port must match the sglang router port set in run-eval-tb-qwen.sh
       dataset_path: /mnt/data/xinyu/program/slime-tb/terminal-bench/tasks # Dataset path on the host machine
-      # task_id: hello-world
+      # task_ids: hello-world
       # n_tasks: 10
       n_attempts: 1 # TB task-level retries (per task within tb run)
       n_concurrent: 8

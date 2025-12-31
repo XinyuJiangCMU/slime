@@ -18,7 +18,8 @@ set -ex
 export PYTHONBUFFERED=16
 export SLIME_HOST_IP=${SLIME_HOST_IP:-"127.0.0.1"}
 
-MODEL_DIR="${MODEL_DIR:-/root/.cache}"
+# MODEL_DIR="${MODEL_DIR:-/root/.cache}"
+MODEL_DIR="${MODEL_DIR:-/mnt/data/xinyu}"
 export MODEL_DIR
 
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
@@ -124,7 +125,7 @@ MISC_ARGS=(
 )
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-export CUDA_VISIBLE_DEVICES=6,7
+export CUDA_VISIBLE_DEVICES=0,1
 
 ray start --head --node-ip-address ${MASTER_ADDR} --port 6380 --num-gpus 2 \
             --disable-usage-stats \

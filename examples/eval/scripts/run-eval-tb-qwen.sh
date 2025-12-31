@@ -18,8 +18,7 @@ set -ex
 export PYTHONBUFFERED=16
 export SLIME_HOST_IP=${SLIME_HOST_IP:-"127.0.0.1"}
 
-# MODEL_DIR="${MODEL_DIR:-/root/.cache}"
-MODEL_DIR="${MODEL_DIR:-/mnt/data/xinyu}"
+MODEL_DIR="${MODEL_DIR:-/root/.cache}"
 export MODEL_DIR
 
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)

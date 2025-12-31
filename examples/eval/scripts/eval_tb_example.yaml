@@ -16,7 +16,7 @@ eval:
       n_samples_per_eval_prompt: 1
   delegate:
     - name: terminal_bench
-      url: http://172.17.0.1:9052 # Port must match the TB server running on the host machine
+      url: http://172.17.0.1:9051 # Port must match the TB server running on the host machine
       timeout_secs: 86400  # 24 hours
       max_retries: 1 # HTTP request retries from Slime to the TB server
       model_name: qwen3-8b

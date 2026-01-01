@@ -104,7 +104,7 @@ WANDB_ARGS=(
    --use-wandb
    --wandb-project slime-eval
    --wandb-group qwen3-8b-eval
-   --wandb-key ${WANDB_KEY}
+   --wandb-key ${WANDB_KEY}   # export WANDB_KEY="your_key"
 )
 
 SGLANG_ARGS=(

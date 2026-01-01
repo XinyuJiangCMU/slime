@@ -23,6 +23,8 @@ This folder wires Terminal Bench (TB) into Slime as an eval delegate. The TB run
 ## 1) Get the code (host)
 
 ```bash
+mkdir slime-tb
+cd slime-tb
 git clone https://github.com/THUDM/slime.git
 git clone https://github.com/laude-institute/terminal-bench
 ```
@@ -40,9 +42,8 @@ docker run \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
   --ulimit nofile=65536:65536 \
-  -v ~/.cache:/root/.cache \
-  -v $(pwd)/slime:/opt/slime \
-  -v $(pwd)/terminal-bench:/opt/terminal-bench \
+  -v /mnt/data/.cache:/root/.cache \
+  -v $(pwd):/shared/slime-tb \
   --name <slime container name> \
   slimerl/slime:latest \
   /bin/bash
@@ -102,10 +103,9 @@ huggingface-cli download open-thoughts/OpenThinker-Agent-v1 \
 After downloading, convert the HuggingFace checkpoint to Slime's torch distributed format. From the Slime root directory, run:
 
 ```bash
-cd /opt/slime
-source scripts/models/qwen3-8B.sh
+source slime/scripts/models/qwen3-8B.sh
 
-PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
+PYTHONPATH=/root/Megatron-LM python slime/tools/convert_hf_to_torch_dist.py \
   ${MODEL_ARGS[@]} \
   --hf-checkpoint /root/.cache/OpenThinker-Agent-v1 \
   --save /root/.cache/OpenThinker-Agent-v1_torch_dist

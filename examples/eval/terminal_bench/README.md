@@ -86,41 +86,29 @@ First, update the `dataset_path` in `eval_tb_example.yaml` to the local path of 
 Then download the HuggingFace model checkpoint inside the Slime container:
 
 ```bash
-huggingface-cli download Qwen/Qwen3-235B-A22B \
-  --local-dir /root/.cache/Qwen3-235B-A22B
+huggingface-cli download Qwen/Qwen3-4B-Instruct-2507 \
+  --local-dir /root/.cache/Qwen/Qwen3-4B-Instruct-2507
 ```
 
 After downloading, convert the HuggingFace checkpoint to Slime's torch distributed format. From the Slime root directory, run:
 
 ```bash
 cd /shared/slime-tb/slime
-source scripts/models/qwen3-235B-A22B.sh
+source scripts/models/qwen3-4B-Instruct-2507.sh
 
 export PYTHONPATH=/root/Megatron-LM:/shared/slime-tb/slime
+export CUDA_VISIBLE_DEVICES=4
 
 python tools/convert_hf_to_torch_dist.py \
   ${MODEL_ARGS[@]} \
-  --hf-checkpoint /root/.cache/Qwen3-235B-A22B \
-  --save /root/.cache/Qwen3-235B-A22B_torch_dist
-
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
-torchrun --nproc_per_node 8 tools/convert_hf_to_torch_dist.py \
-  ${MODEL_ARGS[@]} \
-  --tensor-model-parallel-size 4 \
-  --pipeline-model-parallel-size 2 \
-  --expert-model-parallel-size 8 \
-  --expert-tensor-parallel-size 1 \
-  --hf-checkpoint /root/.cache/Qwen3-235B-A22B \
-  --save /root/.cache/Qwen3-235B-A22B_torch_dist
-
+  --hf-checkpoint /root/.cache/Qwen3-4B-Instruct-2507 \
+  --save /root/.cache/Qwen3-4B-Instruct-2507_torch_dist
 ```
 
 Finally, run the following command inside the Slime container:
 
 ```bash
-bash slime/examples/eval/scripts/run-eval-tb-qwen3-235B.sh 2>&1 | tee run.log
+bash slime/examples/eval/scripts/run-eval-tb-qwen3-4b-instruct.sh 2>&1 | tee run.log
 ```
 
 For convenience, you can restrict the evaluation scope in `eval_tb_example.yaml`, either by specifying a single task or multiple tasks (`task_ids`), or by limiting the number of tasks via `n_tasks`.

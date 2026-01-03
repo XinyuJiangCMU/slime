@@ -222,7 +222,7 @@ class TerminalBenchEvaluator:
             "tb",
             "run",
             "-a",
-            "terminus-2",  # Added Agent flag
+            "terminus-1",  # Added Agent flag
             "--output-path",
             str(self._config.output_root),
             "--run-id",

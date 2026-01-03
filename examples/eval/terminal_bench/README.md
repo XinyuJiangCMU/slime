@@ -14,7 +14,7 @@ This folder wires Terminal Bench (TB) into Slime as an eval delegate. The TB run
 ```bash
 mkdir slime-tb
 cd slime-tb
-git clone https://github.com/THUDM/slime.git
+git clone -b feat/tb-eval-integration https://github.com/XinyuJiangCMU/slime.git
 git clone https://github.com/laude-institute/terminal-bench
 ```
 
@@ -33,7 +33,7 @@ docker run \
   --ulimit nofile=65536:65536 \
   -v /mnt/data/.cache:/root/.cache \
   -v $(pwd):/shared/slime-tb \
-  --name <slime container name> \
+  --name sglang-rl-jxy-qwen235B \
   slimerl/slime:latest \
   /bin/bash
 ```
@@ -41,7 +41,7 @@ docker run \
 ## 3) Inside the Slime container
 
 ```bash
-docker exec -it <slime container name> /bin/bash
+docker exec -it sglang-rl-jxy-qwen235B /bin/bash
 ```
 
 ## 4) Terminal Bench environment (host)
@@ -86,28 +86,41 @@ First, update the `dataset_path` in `eval_tb_example.yaml` to the local path of 
 Then download the HuggingFace model checkpoint inside the Slime container:
 
 ```bash
-huggingface-cli download open-thoughts/OpenThinker-Agent-v1 \
---local-dir /root/.cache/OpenThinker-Agent-v1
+huggingface-cli download Qwen/Qwen3-235B-A22B \
+  --local-dir /root/.cache/Qwen3-235B-A22B
 ```
 
 After downloading, convert the HuggingFace checkpoint to Slime's torch distributed format. From the Slime root directory, run:
 
 ```bash
 cd /shared/slime-tb/slime
-source scripts/models/qwen3-8B.sh
+source scripts/models/qwen3-235B-A22B.sh
 
 export PYTHONPATH=/root/Megatron-LM:/shared/slime-tb/slime
 
 python tools/convert_hf_to_torch_dist.py \
   ${MODEL_ARGS[@]} \
-  --hf-checkpoint /root/.cache/OpenThinker-Agent-v1 \
-  --save /root/.cache/OpenThinker-Agent-v1_torch_dist
+  --hf-checkpoint /root/.cache/Qwen3-235B-A22B \
+  --save /root/.cache/Qwen3-235B-A22B_torch_dist
+
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+torchrun --nproc_per_node 8 tools/convert_hf_to_torch_dist.py \
+  ${MODEL_ARGS[@]} \
+  --tensor-model-parallel-size 4 \
+  --pipeline-model-parallel-size 2 \
+  --expert-model-parallel-size 8 \
+  --expert-tensor-parallel-size 1 \
+  --hf-checkpoint /root/.cache/Qwen3-235B-A22B \
+  --save /root/.cache/Qwen3-235B-A22B_torch_dist
+
 ```
 
 Finally, run the following command inside the Slime container:
 
 ```bash
-bash slime/examples/eval/scripts/run-eval-tb-qwen.sh 2>&1 | tee run.log
+bash slime/examples/eval/scripts/run-eval-tb-qwen3-235B.sh 2>&1 | tee run.log
 ```
 
 For convenience, you can restrict the evaluation scope in `eval_tb_example.yaml`, either by specifying a single task or multiple tasks (`task_ids`), or by limiting the number of tasks via `n_tasks`.

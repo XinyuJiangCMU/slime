@@ -16,7 +16,7 @@ pkill -9 python
 set -ex
 
 export PYTHONBUFFERED=16
-export SLIME_HOST_IP=${SLIME_HOST_IP:-"127.0.0.1"}
+# export SLIME_HOST_IP=${SLIME_HOST_IP:-"127.0.0.1"}
 
 MODEL_DIR="${MODEL_DIR:-/root/.cache}"
 export MODEL_DIR
@@ -52,11 +52,11 @@ ROLLOUT_ARGS=(
    --rollout-shuffle
    --rm-type deepscaler
    --num-rollout 1
-   --rollout-batch-size 32
+   --rollout-batch-size 8
    --n-samples-per-prompt 8
    --rollout-max-response-len 8192
    --rollout-temperature 0.8
-   --global-batch-size 256
+   --global-batch-size 64
    --balance-data
 )
 
@@ -122,7 +122,8 @@ MISC_ARGS=(
 )
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-export CUDA_VISIBLE_DEVICES=0,1
+# export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=2,3
 
 ray start --head --node-ip-address ${MASTER_ADDR} --port 6381 --num-gpus 2 \
             --disable-usage-stats \

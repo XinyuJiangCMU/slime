@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Example launcher that reuses the Qwen3-8B recipe but delegates evaluation to an
+# Example launcher that reuses the Qwen3-32B recipe but delegates evaluation to an
 # external Terminal Bench server via the eval_delegate_rollout wrapper.
 
 # Clean up any stale processes from a previous run.
@@ -31,16 +31,16 @@ echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." &>/dev/null && pwd)"
-source "${REPO_ROOT}/scripts/models/qwen3-8B.sh"
+source "${REPO_ROOT}/scripts/models/qwen3-32B.sh"
 
 # Store eval/delegate settings in a YAML config similar to examples/eval_multi_task.
 EVAL_CONFIG_PATH=${TB_EVAL_CONFIG_PATH:-"${REPO_ROOT}/examples/eval/scripts/eval_tb_example.yaml"}
 
 CKPT_ARGS=(
-   --hf-checkpoint ${MODEL_DIR}/OpenThinker-Agent-v1 # huggingface-cli download open-thoughts/OpenThinker-Agent-v1
-   --ref-load ${MODEL_DIR}/OpenThinker-Agent-v1_torch_dist
-   # --load ${MODEL_DIR}/OpenThinker-Agent-v1_slime/
-   --save ${MODEL_DIR}/OpenThinker-Agent-v1_slime/
+   --hf-checkpoint ${MODEL_DIR}/Qwen3-32B # huggingface-cli download Qwen/Qwen3-32B
+   --ref-load ${MODEL_DIR}/Qwen3-32B_torch_dist
+   # --load ${MODEL_DIR}/Qwen3-32B_slime/
+   --save ${MODEL_DIR}/Qwen3-32B_slime/
    --save-interval 20
 )
 
@@ -51,7 +51,7 @@ ROLLOUT_ARGS=(
    --apply-chat-template
    --rollout-shuffle
    --rm-type deepscaler
-   --num-rollout 3000
+   --num-rollout 1
    --rollout-batch-size 32
    --n-samples-per-prompt 8
    --rollout-max-response-len 8192
@@ -61,13 +61,13 @@ ROLLOUT_ARGS=(
 )
 
 EVAL_ARGS=(
-   --eval-interval 5
+   --eval-interval 1
    --eval-config "${EVAL_CONFIG_PATH}"
    --eval-function-path examples.eval.eval_delegate_rollout.generate_rollout
 )
 
 PERF_ARGS=(
-   --tensor-model-parallel-size 1
+   --tensor-model-parallel-size 4
    --pipeline-model-parallel-size 1
    --context-parallel-size 1
    --expert-model-parallel-size 1
@@ -103,7 +103,7 @@ OPTIMIZER_ARGS=(
 WANDB_ARGS=(
    --use-wandb
    --wandb-project slime-eval
-   --wandb-group qwen3-8b-eval
+   --wandb-group qwen3-32b-eval
    --wandb-key ${WANDB_KEY}   # export WANDB_KEY="your_key"
 )
 
@@ -122,9 +122,9 @@ MISC_ARGS=(
 )
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 
-ray start --head --node-ip-address ${MASTER_ADDR} --port 6380 --num-gpus 2 \
+ray start --head --node-ip-address ${MASTER_ADDR} --port 6380 --num-gpus 4 \
             --disable-usage-stats \
             --dashboard-host=0.0.0.0 \
             --dashboard-port=8266 \
@@ -145,7 +145,7 @@ ray job submit --address="http://${MASTER_ADDR}:8266" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
    -- python3 train.py \
    --actor-num-nodes 1 \
-   --actor-num-gpus-per-node 2 \
+   --actor-num-gpus-per-node 4 \
    --colocate \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \

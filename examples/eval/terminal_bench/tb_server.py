@@ -223,6 +223,8 @@ class TerminalBenchEvaluator:
             "run",
             "-a",
             "terminus-2",  # Added Agent flag
+            "-d",
+            "terminal-bench-core==0.1.1",
             "--output-path",
             str(self._config.output_root),
             "--run-id",

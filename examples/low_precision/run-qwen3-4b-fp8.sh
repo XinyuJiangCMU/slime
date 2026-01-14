@@ -46,7 +46,7 @@ ROLLOUT_ARGS=(
    --rollout-batch-size 32
    --n-samples-per-prompt 8
    --rollout-max-response-len 8192
-   --rollout-temperature 0.8
+   --rollout-temperature 1
 
    --global-batch-size 256
    --balance-data
@@ -57,7 +57,7 @@ EVAL_ARGS=(
    --eval-prompt-data aime /root/data/aime-2024.jsonl
    --n-samples-per-eval-prompt 16
    --eval-max-response-len 16384
-   --eval-top-p 0.7
+   --eval-top-p 1
 )
 
 PERF_ARGS=(
@@ -120,14 +120,6 @@ MISC_ARGS=(
    --attention-backend flash
 )
 
-PRECISE_ARGS=(
-   --transformer-impl transformer_engine
-   --bf16
-   --fp8-format e4m3
-   --fp8-recipe blockwise
-   --fp8-param-gather
-)
-
 
 # launch the master node of ray in container
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
@@ -159,5 +151,4 @@ ray job submit --address="http://127.0.0.1:8265" \
    ${PERF_ARGS[@]} \
    ${EVAL_ARGS[@]} \
    ${SGLANG_ARGS[@]} \
-   ${MISC_ARGS[@]} \
-   ${PRECISE_ARGS[@]}
+   ${MISC_ARGS[@]}

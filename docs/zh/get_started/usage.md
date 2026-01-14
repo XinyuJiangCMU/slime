@@ -31,6 +31,15 @@
 
 - `--colocate`：开启训推一体。开启后会忽略 `--rollout-num-gpus` 让训练和推理的卡数相等。
 
+此外，slime 支持 Prefill 和 Decode 的分离部署 (PD Disaggregation)，可以通过设置 `--prefill-num-servers` 参数来指定用于 Prefill 的服务器数量。
+
+### 选择训练后端
+
+slime 支持多种训练后端，可以通过 `--train-backend` 参数进行选择：
+
+- `megatron`（默认）：使用 Megatron-LM 作为训练后端，支持大规模模型的高效训练；
+- `fsdp`：使用 PyTorch FSDP 作为训练后端，可以直接加载 HuggingFace 格式权重，无需转换。
+
 ### 加载 megatron
 
 megatron 与 sglang, vllm 或者 huggingface trainer 之类的工具不同，他不能直接读取 huggingface ckpt，而是需要用户配置好要训练的模型的参数，并且加载 megatron 自己的 ckpt。
@@ -142,6 +151,7 @@ sglang 的加载非常简单，只需要：
 - 在第一个训练步之前，slime 会把 megatron 里的参数同步给 sglang，所以 `--hf-checkpoint` 中不需要有最新的训练参数，在续训得时候也不需要更换 hf ckpt；
 - sglang 默认会从 huggingface ckpt 中 `config.json` 读取模型的最大 context length，可以使用 `--sglang-context-length` 参数来对这个值进行覆盖，从而支持进行更长的推理；
 - 在训推一体的训练过程中，虽然 megatron 和 sglang 会先后 offload，但是还是需要为对方留有一些空间，需要通过减小 `--sglang-mem-fraction-static` 来调整 sglang 的显存占用总量。
+- slime 支持透传 sgl-router 的参数，方式是在原参数名前加上 `router` 前缀。例如，sgl-router 的 `--balance-abs-threshold` 参数需要设置为 `--router-balance-abs-threshold`。由于 sgl-router 默认使用 cache-aware routing，可能会导致请求分配不均衡的问题。可以通过设置 `--router-balance-abs-threshold 0` 来强制均衡分配，但这可能会影响多轮对话场景下 prefix cache 的命中率。
 
 对于一些 sglang 的自定义以及 slime 引入 sglang 的原理，请见 sglang 使用方法一节。
 
@@ -179,9 +189,11 @@ sglang 的加载非常简单，只需要：
   - `grpo`（https://arxiv.org/abs/2402.03300）；
   - `gspo`（https://arxiv.org/abs/2507.18071）；
   - `reinforce_plus_plus` 与 `reinforce_plus_plus_baseline`（https://arxiv.org/abs/2501.03262）；
-  - `ppo`（https://arxiv.org/abs/1707.06347）。
+  - `ppo`（https://arxiv.org/abs/1707.06347）；
+  - `on_policy_distillation`。
 - `--calculate-per-token-loss`：slime 中默认的方案是 per sample loss，即 `mean(sum(sample_i) / len(sample_i))`，如果需要计算 per token loss，即 `sum(sum(sample_i)) / sum(len(sample_i))`，可以开启 `--calculate-per-token-loss`；
-- `--use-tis`：如果需要开启 tis（https://fengyao.notion.site/off-policy-rl），可以开启这一设置。
+- `--use-tis`：如果需要开启 tis（https://fengyao.notion.site/off-policy-rl），可以开启这一设置；
+- `--true-on-policy-mode`：开启 True On-Policy 模式，即在训练过程中严格保证数据是当前策略生成的。
 
 ## 自定义 rollout 函数
 
@@ -314,7 +326,7 @@ if __name__ == "__main__":
 
 slime 同样也支持FSDP2作为训练后端，可以参考[文档](https://github.com/zhaochenyang20/Awesome-ML-SYS-Tutorial/blob/main/rlhf/slime/fsdp/readme.md)。
 
-> FSDP 通过 `AutoModelForCausalLM.from_pretrained()` 自动读取所有架构信息，无需手动指定。Megatron 需要手动配置参数读取 model 架构信息，或者通过 `--use-hf-config-for-megatron` 实现自动推断， FSDP可以全部从 `config.json` 自动读取，可以直接避免权重格式转换步骤。
+> FSDP 通过 `AutoModelForCausalLM.from_pretrained()` 自动读取所有架构信息，无需手动指定。Megatron 需要手动配置参数读取 model 架构信息，FSDP可以全部从 `config.json` 自动读取，可以直接避免权重格式转换步骤。
 
 可以通过在命令行传递 `--train-backend fsdp` 来启动 FSDP 作为训练后端。
 
@@ -324,7 +336,7 @@ FSDP和Megatron后端支持的参数的对比如下表所示，接下来FSDP会�
 
 | 配置类别 | Megatron 参数 | FSDP 参数 | 说明 |
 | --- | --- | --- | --- |
-| **模型加载** | `--load` (Megatron checkpoint) + 架构参数 (`--num-layers`, `--hidden-size` 等) 或 `--use-hf-config-for-megatron` | `--hf-checkpoint` (必需) | **FSDP**: 直接使用 HuggingFace 格式，无需转换权重，通过 `AutoConfig` 自动推断架构 |
+| **模型加载** | `--load` (Megatron checkpoint) + 架构参数 (`--num-layers`, `--hidden-size` 等) | `--hf-checkpoint` (必需) | **FSDP**: 直接使用 HuggingFace 格式，无需转换权重，通过 `AutoConfig` 自动推断架构 |
 | **张量并行** | `--tensor-model-parallel-size` | Coming Soon |  |
 | **流水线并行** | `--pipeline-model-parallel-size` | Coming Soon |  |
 | **专家并行** | `--expert-model-parallel-size` | Coming Soon |  |
@@ -361,7 +373,7 @@ hf download --repo-type dataset zhuzilin/aime-2024 \
 # 克隆代码并安装依赖
 git clone https://github.com/THUDM/slime.git
 cd slime
-pip install -e .
+pip install -e . --no-deps
 
 
 # FSDP不用进行权重转换，native 支持 huggingface 格式

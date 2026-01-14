@@ -150,18 +150,7 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
     url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
 
     # Handle partial rollout samples: continue generation from existing response
-    prompt = sample.prompt
-    if args.apply_chat_template:
-        assert isinstance(prompt, list), "prompt should be a list when apply_chat_template is True"
-        prompt_text = state.tokenizer.apply_chat_template(
-            prompt,
-            tokenize=False,
-            add_generation_prompt=True,  # Add generation prompt for the assistant
-            **(args.apply_chat_template_kwargs or {}),
-        )
-    else:
-        assert isinstance(prompt, str), "prompt should be a string when apply_chat_template is False"
-        prompt_text = prompt
+    prompt_text = sample.prompt
     prompt_tokens_ids = state.tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
     response = ""
     response_token_ids = []
@@ -241,6 +230,7 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
     sample.response_length = len(response_token_ids)
     sample.response = response
     sample.loss_mask = loss_mask
+    sample.prompt = prompt_text
 
     # Store log probs if enabled
     if SEARCH_R1_CONFIGS["return_logprob"]:

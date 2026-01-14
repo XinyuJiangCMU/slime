@@ -1,3 +1,4 @@
+import itertools
 import logging
 import multiprocessing
 import random
@@ -9,6 +10,7 @@ import numpy as np
 import ray
 import torch
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from sglang.srt.constants import GPU_MEMORY_TYPE_CUDA_GRAPH, GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_WEIGHTS
 
 from slime.backends.sglang_utils.sglang_engine import SGLangEngine
 from slime.rollout.base_types import call_rollout_fn
@@ -56,6 +58,11 @@ class RolloutManager:
         self.custom_reward_post_process_func = None
         if self.args.custom_reward_post_process_path is not None:
             self.custom_reward_post_process_func = load_function(self.args.custom_reward_post_process_path)
+        self.custom_convert_samples_to_train_data_func = None
+        if self.args.custom_convert_samples_to_train_data_path is not None:
+            self.custom_convert_samples_to_train_data_func = load_function(
+                self.args.custom_convert_samples_to_train_data_path
+            )
         logger.info(f"import {self.args.rollout_function_path} as generate_rollout function.")
         logger.info(f"import {self.args.eval_function_path} as eval_generate_rollout function.")
 
@@ -68,14 +75,41 @@ class RolloutManager:
         self.num_new_engines = init_rollout_engines(args, pg, self.all_rollout_engines)
         self.nodes_per_engine = max(1, args.rollout_num_gpus_per_engine // args.num_gpus_per_node)
         self.rollout_engine_lock = Lock.options(num_cpus=1, num_gpus=0).remote()
+        self.rollout_id = -1
 
         self._metric_checker = MetricChecker.maybe_create(args)
+        self._health_monitor = None
         if self.args.use_fault_tolerance:
             self._health_monitor = RolloutHealthMonitor(self, args)
+            self._health_monitor.start()  # Start the monitor thread (in paused state)
+            self._ci_fault_injection_pending = self.args.ci_test  # Flag for CI fault injection
+
+    def _try_ci_fault_injection(self):
+        """Try to inject fault during generate (when health monitor is running)."""
+        if not self._ci_fault_injection_pending:
+            return
+
+        # Only inject fault once
+        self._ci_fault_injection_pending = False
+
+        if self.all_rollout_engines and self.all_rollout_engines[0]:
+            logger.info("CI Fault Injection: Simulating crash on engine 0 during generate")
+            try:
+                # This will cause the ray actor to exit
+                self.all_rollout_engines[0].simulate_crash.remote()
+                # Wait for health monitor to detect the crash and mark engine as None
+                # health_check_interval + health_check_timeout + buffer
+                wait_time = self.args.rollout_health_check_interval + self.args.rollout_health_check_timeout + 5
+                logger.info(f"CI Fault Injection: Waiting {wait_time}s for health monitor to detect crash")
+                time.sleep(wait_time)
+            except Exception as e:
+                logger.warning(f"CI Fault Injection failed: {e}")
 
     def dispose(self):
         if self._metric_checker is not None:
             self._metric_checker.dispose()
+        if self._health_monitor is not None:
+            self._health_monitor.stop()
 
     # TODO maybe rename "rollout_engines" and "all_rollout_engines" later
     @property
@@ -91,27 +125,23 @@ class RolloutManager:
         return len(self.data_source.dataset) // self.args.rollout_batch_size
 
     def generate(self, rollout_id):
-        monitor_started = self.args.use_fault_tolerance and self._health_monitor.start()
         start_time = time.time()
-        try:
-            data, metrics = self._get_rollout_data(rollout_id=rollout_id)
-            self._save_debug_rollout_data(data, rollout_id=rollout_id, evaluation=False)
-            _log_rollout_data(rollout_id, self.args, data, metrics, time.time() - start_time)
-            data = self._convert_samples_to_train_data(data)
-            return self._split_train_data_by_dp(data, self.train_parallel_config["dp_size"])
-        finally:
-            if monitor_started:
-                self._health_monitor.stop()
-                self.num_new_engines = init_rollout_engines(self.args, self.pg, self.all_rollout_engines)
-            else:
-                self.num_new_engines = 0
+        self.rollout_id = rollout_id
+        self.health_monitoring_resume()
+        if self.args.ci_test and self.args.use_fault_tolerance and rollout_id >= 2:
+            self._try_ci_fault_injection()
+        data, metrics = self._get_rollout_data(rollout_id=rollout_id)
+        self._save_debug_rollout_data(data, rollout_id=rollout_id, evaluation=False)
+        _log_rollout_data(rollout_id, self.args, data, metrics, time.time() - start_time)
+        data = self._convert_samples_to_train_data(data)
+        return self._split_train_data_by_dp(data, self.train_parallel_config["dp_size"])
 
     def eval(self, rollout_id):
         if self.args.debug_train_only:
             # if debug train only, we don't generate evaluation data
             return
+        self.health_monitoring_resume()
 
-        # TODO: add fault tolerance to eval
         result = call_rollout_fn(self.eval_generate_rollout, self.args, rollout_id, self.data_source, evaluation=True)
         data = result.data
         self._save_debug_rollout_data(data, rollout_id=rollout_id, evaluation=True)
@@ -126,10 +156,54 @@ class RolloutManager:
         self.data_source.load(rollout_id)
 
     def offload(self):
-        return ray.get([engine.release_memory_occupation.remote() for engine in self.rollout_engines])
+        self.health_monitoring_pause()
+        return ray.get(
+            [engine.release_memory_occupation.remote() for engine in self.rollout_engines if engine is not None]
+        )
 
-    def onload(self, tags: list[str] = None):
-        return ray.get([engine.resume_memory_occupation.remote(tags=tags) for engine in self.rollout_engines])
+    def onload(self, tags: list[str] | None = None):
+        return ray.get(
+            [
+                engine.resume_memory_occupation.remote(tags=tags)
+                for engine in self.rollout_engines
+                if engine is not None
+            ]
+        )
+
+    def onload_weights(self):
+        self.onload(tags=[GPU_MEMORY_TYPE_WEIGHTS])
+
+    def onload_kv(self):
+        self.onload(tags=[GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_CUDA_GRAPH])
+
+    def recover_rollout_engines(self):
+        """Restart any dead rollout engines and update num_new_engines for update_weights detection."""
+        self.health_monitoring_pause()
+        if self.rollout_id == -1:
+            return self.rollout_engines, self.rollout_engine_lock, self.num_new_engines
+
+        dead_indices = [i for i, engine in enumerate(self.all_rollout_engines) if engine is None]
+        self.num_new_engines = init_rollout_engines(self.args, self.pg, self.all_rollout_engines)
+        logger.info(f"Recovered {self.num_new_engines} dead rollout engines")
+        assert self.num_new_engines == len(dead_indices), "num_new_engines does not match dead_indices length"
+        if self.args.offload_rollout and dead_indices:
+            new_engines = [self.all_rollout_engines[i] for i in dead_indices]
+            ray.get([engine.release_memory_occupation.remote() for engine in new_engines])
+            ray.get([engine.resume_memory_occupation.remote(tags=[GPU_MEMORY_TYPE_WEIGHTS]) for engine in new_engines])
+
+        return self.rollout_engines, self.rollout_engine_lock, self.num_new_engines
+
+    def clear_num_new_engines(self):
+        # when fault tolerance is not enabled, we need to manually clear num_new_engines after update_weights
+        self.num_new_engines = 0
+
+    def health_monitoring_pause(self) -> None:
+        if self._health_monitor is not None:
+            self._health_monitor.pause()
+
+    def health_monitoring_resume(self) -> None:
+        if self._health_monitor is not None:
+            self._health_monitor.resume()
 
     def check_weights(self, action: str):
         return ray.get([engine.check_weights.remote(action=action) for engine in self.rollout_engines])
@@ -137,7 +211,7 @@ class RolloutManager:
     def _get_rollout_data(self, rollout_id):
         if self.args.load_debug_rollout_data:
             data = torch.load(
-                open(self.args.load_debug_rollout_data.format(rollout_id=rollout_id), "rb"),
+                self.args.load_debug_rollout_data.format(rollout_id=rollout_id),
                 weights_only=False,
             )["samples"]
             data = [Sample.from_dict(sample) for sample in data]
@@ -155,16 +229,55 @@ class RolloutManager:
             data = data.samples
             # flatten the data if it is a list of lists
             while isinstance(data[0], list):
-                data = sum(data, [])
+                data = list(itertools.chain.from_iterable(data))
 
-            if self.args.disable_rollout_trim_samples:
-                logger.info(f"Collectd {len(data)} samples from rollout to train")
-            elif len(data) % self.args.global_batch_size != 0:
-                trim_len = (len(data) // self.args.global_batch_size) * self.args.global_batch_size
-                origin_data_length = len(data)
-                data = data[:trim_len]
-                logger.info(f"trim number of samples from {origin_data_length} to {trim_len}")
+            if not self.args.disable_rollout_trim_samples:
+                global_batch_size = self.args.global_batch_size
+                if self.args.use_dynamic_global_batch_size:
+                    logger.info(f"Collected {len(data)} samples from rollout to train with dynamic global batch size")
+                    # TODO: this is a temporary solution, we should directly save dynamic_global_batch_size to rollout data
+                    self._dynamic_global_batch_size = self._compute_dynamic_global_batch_size(len(data))
+                    global_batch_size = self._dynamic_global_batch_size
+
+                if len(data) % global_batch_size != 0:
+                    trim_len = (len(data) // global_batch_size) * global_batch_size
+                    if trim_len == 0:
+                        raise ValueError(f"Not enough samples {len(data)} for global_batch_size {global_batch_size}")
+                    origin_data_length = len(data)
+                    data = data[:trim_len]
+                    logger.info(f"trim number of samples from {origin_data_length} to {trim_len}")
+                logger.info(f"Final collected {len(data)} samples from rollout to train")
+
         return data, metrics
+
+    def _compute_dynamic_global_batch_size(self, num_samples: int) -> int:
+        """Calculate dynamic global_batch_size to ensure only one training step.
+
+        Strategy: global_batch_size = num_samples rounded down to a multiple of dp_size
+        This ensures num_steps_per_rollout = num_samples // global_batch_size = 1
+        """
+        dp_size = self.train_parallel_config["dp_size"]
+        original_gbs = self.args.global_batch_size
+
+        # Round down to a multiple of dp_size to ensure only one training step
+        dynamic_gbs = (num_samples // dp_size) * dp_size
+
+        if dynamic_gbs == 0:
+            # Too few samples, use at least dp_size
+            dynamic_gbs = dp_size
+            logger.warning(f"num_samples={num_samples} < dp_size={dp_size}, using dp_size as global_batch_size")
+
+        # Calculate how many samples will be discarded
+        wasted = num_samples - dynamic_gbs
+
+        if dynamic_gbs != original_gbs or wasted > 0:
+            logger.info(
+                f"Dynamic global_batch_size: {original_gbs} -> {dynamic_gbs} "
+                f"(num_samples={num_samples}, dp_size={dp_size}, "
+                f"num_steps=1, wasted={wasted})"
+            )
+
+        return dynamic_gbs
 
     def _save_debug_rollout_data(self, data, rollout_id, evaluation: bool):
         # TODO to be refactored (originally Buffer._set_data)
@@ -216,6 +329,9 @@ class RolloutManager:
         """
         Convert inference generated samples to training data.
         """
+        if self.custom_convert_samples_to_train_data_func is not None:
+            return self.custom_convert_samples_to_train_data_func(self.args, samples)
+
         raw_rewards, rewards = self._post_process_rewards(samples)
 
         assert len(raw_rewards) == len(samples)
@@ -266,8 +382,8 @@ class RolloutManager:
         if samples[0].train_metadata is not None:
             train_data["metadata"] = [sample.train_metadata for sample in samples]
 
-        if samples[0].multimodal_inputs is not None:
-            train_data["multimodal_inputs"] = [sample.multimodal_inputs for sample in samples]
+        if samples[0].multimodal_train_inputs is not None:
+            train_data["multimodal_train_inputs"] = [sample.multimodal_train_inputs for sample in samples]
 
         if "teacher_log_probs" in samples[0].__dict__:
             train_data["teacher_log_probs"] = [sample.teacher_log_probs for sample in samples]
@@ -300,7 +416,7 @@ class RolloutManager:
             rollout_data["partition"] = partition
             for key in [
                 "tokens",
-                "multimodal_inputs",
+                "multimodal_train_inputs",
                 "response_lengths",
                 "rewards",
                 "truncated",
@@ -324,6 +440,9 @@ class RolloutManager:
                 if key not in data:
                     continue
                 rollout_data[key] = data[key]
+            # Pass dynamic global_batch_size to training side
+            if hasattr(self, "_dynamic_global_batch_size"):
+                rollout_data["dynamic_global_batch_size"] = self._dynamic_global_batch_size
             rollout_data_refs.append(Box(ray.put(rollout_data)))
         return rollout_data_refs
 
@@ -341,7 +460,7 @@ def init_rollout_engines(args, pg, all_rollout_engines):
             num_engines > prefill_num_servers
         ), f"num_engines {num_engines} should be larger than prefill_num_servers {prefill_num_servers}"
 
-    pg, reordered_bundle_indices = pg
+    pg, reordered_bundle_indices, reordered_gpu_ids = pg
 
     RolloutRayActor = ray.remote(SGLangEngine)
 
@@ -352,6 +471,9 @@ def init_rollout_engines(args, pg, all_rollout_engines):
 
         num_gpus = 0.2
         num_cpus = num_gpus
+
+        # Get the base GPU ID from placement group
+        base_gpu_id = int(reordered_gpu_ids[i * num_gpu_per_engine])
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
@@ -367,6 +489,7 @@ def init_rollout_engines(args, pg, all_rollout_engines):
             "SGLANG_MEMORY_SAVER_CUDA_GRAPH": "true",
             "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_FALLBACK_VARIANT": "true",
             "SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION": "false",
+            "SGLANG_ENABLE_STRICT_MEM_CHECK_DURING_IDLE": "false",
         }
 
         worker_type = "regular"
@@ -383,7 +506,7 @@ def init_rollout_engines(args, pg, all_rollout_engines):
             runtime_env={
                 "env_vars": env_vars,
             },
-        ).remote(args, rank=i, worker_type=worker_type)
+        ).remote(args, rank=i, worker_type=worker_type, base_gpu_id=base_gpu_id)
 
         rollout_engines.append((i, rollout_engine))
         all_rollout_engines[i] = rollout_engine
@@ -411,10 +534,11 @@ def init_rollout_engines(args, pg, all_rollout_engines):
 def _allocate_rollout_engine_addr_and_ports_external(args, rollout_engines):
     addr_and_ports = []
     for rank, _ in rollout_engines:
-        [host, port] = args.rollout_external_engine_addrs[rank].split(":")
+        addr = args.rollout_external_engine_addrs[rank]
+        [host, port] = addr.split(":")
         addr_and_ports.append(
             dict(
-                dist_init_addr=None,
+                dist_init_addr=addr,
                 nccl_port=None,
                 host=host,
                 port=int(port),
@@ -434,6 +558,12 @@ def _allocate_rollout_engine_addr_and_ports_normal(*, args, num_engines, rollout
         1, min(args.num_gpus_per_node, args.rollout_num_gpus) // args.rollout_num_gpus_per_engine
     )
     addr_and_ports = [{} for _ in range(num_engines)]
+
+    # Calculate prefill limit to identify prefill engines
+    prefill_limit = 0
+    if args.prefill_num_servers is not None:
+        num_gpu_per_engine = min(args.rollout_num_gpus_per_engine, args.num_gpus_per_node)
+        prefill_limit = args.prefill_num_servers * args.rollout_num_gpus_per_engine // num_gpu_per_engine
 
     visited_nodes = set()
     for rank, engine in rollout_engines:
@@ -469,9 +599,13 @@ def _allocate_rollout_engine_addr_and_ports_normal(*, args, num_engines, rollout
         get_addr, get_port = get_addr_and_ports(engine)
 
         for i in range(num_engines_on_this_node):
-            addr_and_ports[rank + i]["host"] = get_addr()
-            addr_and_ports[rank + i]["port"] = get_port()
-            addr_and_ports[rank + i]["nccl_port"] = get_port()
+            current_rank = rank + i
+            addr_and_ports[current_rank]["host"] = get_addr()
+            addr_and_ports[current_rank]["port"] = get_port()
+            addr_and_ports[current_rank]["nccl_port"] = get_port()
+
+            if args.prefill_num_servers is not None and current_rank < prefill_limit:
+                addr_and_ports[current_rank]["disaggregation_bootstrap_port"] = get_port()
 
         if args.rollout_num_gpus_per_engine > args.num_gpus_per_node:
             num_node_per_engine = args.rollout_num_gpus_per_engine // args.num_gpus_per_node
@@ -517,12 +651,10 @@ def _start_router(args):
         router_args.port = args.sglang_router_port
         router_args.prometheus_port = find_available_port(random.randint(4000, 5000))
         router_args.log_level = "warn"
+        router_args.request_timeout_secs = args.sglang_router_request_timeout_secs
 
         if args.prefill_num_servers is not None:
             router_args.pd_disaggregation = True
-
-        if hasattr(router_args, "request_timeout_secs"):
-            router_args.request_timeout_secs = args.sglang_router_request_timeout_secs
 
         logger.info(f"Launch router with args: {router_args}")
 
@@ -539,6 +671,11 @@ def _start_router(args):
 
 
 def _log_eval_rollout_data(rollout_id, args, data, extra_metrics: dict[str, Any] | None = None):
+    if args.custom_eval_rollout_log_function_path is not None:
+        custom_log_func = load_function(args.custom_eval_rollout_log_function_path)
+        if custom_log_func(rollout_id, args, data, extra_metrics):
+            return
+
     log_dict = extra_metrics or {}
     for key in data.keys():
         rewards = data[key]["rewards"]
@@ -567,16 +704,17 @@ def _log_eval_rollout_data(rollout_id, args, data, extra_metrics: dict[str, Any]
 
 
 def _log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_time):
+    if args.custom_rollout_log_function_path is not None:
+        custom_log_func = load_function(args.custom_rollout_log_function_path)
+        if custom_log_func(rollout_id, args, samples, rollout_extra_metrics, rollout_time):
+            return
+
     if args.load_debug_rollout_data:
         return
 
     log_dict = {**(rollout_extra_metrics or {})}
-    response_lengths = [sample.effective_response_length for sample in samples]
-    log_dict["perf/rollout_time"] = rollout_time
-    if args.rollout_num_gpus:
-        log_dict["perf/tokens_per_gpu_per_sec"] = sum(response_lengths) / rollout_time / args.rollout_num_gpus
-    log_dict["perf/longest_sample_tokens_per_sec"] = max(response_lengths) / rollout_time
     log_dict |= dict_add_prefix(compute_metrics_from_samples(args, samples), "rollout/")
+    log_dict |= dict_add_prefix(compute_perf_metrics_from_samples(args, samples, rollout_time), "perf/")
     logger.info(f"perf {rollout_id}: {log_dict}")
     step = compute_rollout_step(args, rollout_id)
     log_dict["rollout/step"] = step
@@ -589,10 +727,42 @@ def compute_metrics_from_samples(args, samples):
     log_dict = {}
     log_dict |= dict_add_prefix(compute_statistics(response_lengths), "response_len/")
     log_dict |= _compute_zero_std_metrics(args, samples)
-    log_dict |= _compute_spec_metrics(args, samples)
     log_dict |= _compute_reward_cat_metrics(args, samples)
     log_dict["repetition_frac"] = np.mean([int(has_repetition(s.response)) for s in samples]).item()
     log_dict["truncated_ratio"] = np.mean([int(s.status == Sample.Status.TRUNCATED) for s in samples]).item()
+    return log_dict
+
+
+def compute_perf_metrics_from_samples(args, samples, rollout_time):
+    non_generation_time = [sample.non_generation_time for sample in samples]
+
+    log_dict = {}
+    log_dict["rollout_time"] = rollout_time
+    if max(non_generation_time) > 0:
+        log_dict |= dict_add_prefix(compute_statistics(non_generation_time), "non_generation_time/")
+
+    def token_perf(response_lengths, non_generation_time, key=""):
+        max_response_length = max(response_lengths)
+        if args.rollout_num_gpus:
+            log_dict[f"{key}tokens_per_gpu_per_sec"] = sum(response_lengths) / rollout_time / args.rollout_num_gpus
+        log_dict[f"longest_{key}sample_tokens_per_sec"] = max_response_length / rollout_time
+
+        if max(non_generation_time) == 0:
+            return
+
+        non_generation_time = [
+            t for t, length in zip(non_generation_time, response_lengths, strict=True) if length == max_response_length
+        ]
+        mean_non_generation_time = sum(non_generation_time) / len(non_generation_time)
+
+        log_dict[f"longest_{key}sample_non_generation_time"] = mean_non_generation_time
+        log_dict[f"longest_{key}sample_tokens_per_sec_without_non_generation"] = max_response_length / (
+            rollout_time - mean_non_generation_time
+        )
+
+    token_perf([sample.response_length for sample in samples], non_generation_time, key="")
+    token_perf([sample.effective_response_length for sample in samples], non_generation_time, key="effective_")
+
     return log_dict
 
 
@@ -618,12 +788,19 @@ def _compute_spec_metrics(args, all_samples: list[Sample]):
         return {}
     num_samples = len(all_samples)
     metrics = {}
-    metrics["rollout/spec_accept_rate"] = (
-        sum(sample.spec_info.spec_accept_rate for sample in all_samples) / num_samples
-    )
-    metrics["rollout/spec_accept_length"] = (
-        sum(sample.spec_info.spec_accept_length for sample in all_samples) / num_samples
-    )
+    metrics["spec_accept_rate"] = sum(sample.spec_info.spec_accept_rate for sample in all_samples) / num_samples
+    metrics["spec_accept_length"] = sum(sample.spec_info.spec_accept_length for sample in all_samples) / num_samples
+    return metrics
+
+
+def _compute_prefix_cache_metrics(args, all_samples: list[Sample]):
+    num_samples = len(all_samples)
+    metrics = {}
+    total_cached_tokens = sum(sample.prefix_cache_info.cached_tokens for sample in all_samples)
+    total_prompt_tokens = sum(sample.prefix_cache_info.total_prompt_tokens for sample in all_samples)
+
+    metrics["prefix_cache_hit_rate"] = total_cached_tokens / total_prompt_tokens if total_prompt_tokens > 0 else 0.0
+    metrics["avg_cached_tokens_per_sample"] = total_cached_tokens / num_samples
     return metrics
 
 
